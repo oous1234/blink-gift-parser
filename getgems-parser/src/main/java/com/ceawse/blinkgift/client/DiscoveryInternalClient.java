@@ -23,5 +23,8 @@ public interface DiscoveryInternalClient {
         private String model;
         private String backdrop;
         private String symbol;
+
+        private Integer serialNumber;
+        private Integer totalLimit;
     }
 }

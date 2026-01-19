@@ -35,13 +35,11 @@ public class SnapshotServiceImpl implements SnapshotService {
         log.info(">>> [SNAPSHOT START] ID: {}, Marketplace: {}", snapshotId, marketplace);
 
         try {
-            // 1. Получаем список коллекций от Индексера
             List<IndexerApiClient.CollectionDto> collections = indexerClient.getCollections();
             if (collections == null || collections.isEmpty()) {
                 log.warn(">>> [SNAPSHOT ABORTED] No collections found from Indexer client.");
                 return;
             }
-            log.info(">>> [SNAPSHOT PROGRESS] Found {} collections to process.", collections.size());
 
             int processedCount = 0;
             for (var col : collections) {
@@ -60,28 +58,18 @@ public class SnapshotServiceImpl implements SnapshotService {
         String cursor = null;
         boolean hasMore = true;
         int batchSize = 100;
-        int totalItemsInCollection = 0;
 
         while (hasMore) {
             try {
-                log.debug("Fetching page (cursor: {}) for collection {}", cursor, collectionAddress);
                 var response = getGemsClient.getOnSale(collectionAddress, batchSize, cursor);
-
-                if (response == null || !response.isSuccess() || response.getResponse() == null) {
-                    log.error("Failed to get data for collection {}: Response is null or unsuccessful", collectionAddress);
-                    break;
-                }
+                if (response == null || !response.isSuccess() || response.getResponse() == null) break;
 
                 List<GetGemsSaleItemDto> items = response.getResponse().getItems();
                 if (items == null || items.isEmpty()) {
-                    log.info("No more items for collection {}", collectionAddress);
                     hasMore = false;
                     continue;
                 }
 
-                log.info("Fetched {} items for collection {}", items.size(), collectionAddress);
-
-                // 1. Сохраняем в историю
                 List<GiftHistoryDocument> historyDocs = items.stream()
                         .filter(i -> i.getSale() != null)
                         .map(i -> eventMapper.toSnapshotEntity(i, snapshotId))
@@ -89,38 +77,27 @@ public class SnapshotServiceImpl implements SnapshotService {
 
                 if (!historyDocs.isEmpty()) {
                     historyRepository.saveAll(historyDocs);
-                    log.debug("Saved {} snapshot history records", historyDocs.size());
                 }
 
-                // 2. Отправляем в Discovery
-                int discoverySentCount = 0;
                 for (var item : items) {
                     sendToDiscovery(item);
-                    discoverySentCount++;
                 }
-
-                totalItemsInCollection += items.size();
-                log.info("Collection {}: Processed {} items (Total so far: {})",
-                        collectionAddress, items.size(), totalItemsInCollection);
 
                 cursor = response.getResponse().getCursor();
-                if (cursor == null) {
-                    log.info("Finished collection {} - no more pages.", collectionAddress);
-                    hasMore = false;
-                }
+                if (cursor == null) hasMore = false;
 
-                // Небольшая задержка, чтобы не спамить API
                 Thread.sleep(1000);
-
             } catch (Exception e) {
                 log.error("Error in processCollection for {}: {}", collectionAddress, e.getMessage());
-                hasMore = false; // Прекращаем текущую коллекцию при ошибке
+                hasMore = false;
             }
         }
     }
 
     private void sendToDiscovery(GetGemsSaleItemDto item) {
         try {
+            var numbers = eventMapper.parseNumbers(item.getName());
+
             String model = null, backdrop = null, symbol = null;
             if (item.getAttributes() != null) {
                 for (var attr : item.getAttributes()) {
@@ -130,12 +107,12 @@ public class SnapshotServiceImpl implements SnapshotService {
                 }
             }
 
-            log.debug("Sending to Discovery: {} (Address: {})", item.getName(), item.getAddress());
-
             discoveryClient.enrich(DiscoveryInternalClient.EnrichmentRequest.builder()
                     .id(item.getAddress())
                     .giftName(item.getName())
                     .collectionAddress(item.getCollectionAddress())
+                    .serialNumber(numbers.serialNumber())
+                    .totalLimit(numbers.totalLimit())
                     .model(model)
                     .backdrop(backdrop)
                     .symbol(symbol)

@@ -41,12 +41,10 @@ public class HistoryServiceImpl implements HistoryService {
             var items = response.getResponse().getItems();
 
             for (var item : items) {
-                // 1. Сохраняем событие в локальную историю
                 if (!repository.existsByHash(item.getHash())) {
                     repository.save(mapper.toHistoryEntity(item));
                 }
 
-                // 2. Если это выставление на продажу — запрашиваем детали и шлем в Discovery
                 if (item.getTypeData() != null && "putUpForSale".equals(item.getTypeData().getType())) {
                     processNewListing(item);
                 }
@@ -62,12 +60,11 @@ public class HistoryServiceImpl implements HistoryService {
 
     private void processNewListing(GetGemsItemDto historyItem) {
         try {
-            // Дозапрашиваем атрибуты, так как их нет в ленте событий
             var detailResponse = apiClient.getNftDetails(historyItem.getAddress());
-
             if (detailResponse == null || !detailResponse.isSuccess() || detailResponse.getResponse() == null) return;
 
             var details = detailResponse.getResponse();
+            var numbers = mapper.parseNumbers(details.getName());
 
             String model = null, backdrop = null, symbol = null;
             if (details.getAttributes() != null) {
@@ -82,6 +79,8 @@ public class HistoryServiceImpl implements HistoryService {
                     .id(details.getAddress())
                     .giftName(details.getName())
                     .collectionAddress(details.getCollectionAddress())
+                    .serialNumber(numbers.serialNumber())
+                    .totalLimit(numbers.totalLimit())
                     .model(model)
                     .backdrop(backdrop)
                     .symbol(symbol)

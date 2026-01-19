@@ -8,11 +8,14 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Component
 public class EventMapper {
 
     private static final String MARKETPLACE_GETGEMS = "getgems";
+    private static final Pattern GIFT_NAME_PATTERN = Pattern.compile("#(\\d+)(?:\\s+of\\s+|/)(\\d+)");
 
     public GiftHistoryDocument toHistoryEntity(GetGemsItemDto dto) {
         GiftHistoryDocument doc = new GiftHistoryDocument();
@@ -37,7 +40,6 @@ public class EventMapper {
         return doc;
     }
 
-    // Маппинг из снапшота (Snapshot List)
     public GiftHistoryDocument toSnapshotEntity(GetGemsSaleItemDto item, String snapshotId) {
         GiftHistoryDocument doc = new GiftHistoryDocument();
         doc.setMarketplace(MARKETPLACE_GETGEMS);
@@ -60,7 +62,6 @@ public class EventMapper {
         return doc;
     }
 
-    // Маппинг уникального подарка
     public UniqueGiftDocument toUniqueGiftEntity(GetGemsSaleItemDto item) {
         UniqueGiftDocument.GiftAttributes.GiftAttributesBuilder attrsBuilder = UniqueGiftDocument.GiftAttributes.builder();
         attrsBuilder.updatedAt(Instant.now());
@@ -83,6 +84,22 @@ public class EventMapper {
                 .build();
     }
 
+    public GiftNumbers parseNumbers(String name) {
+        if (name == null) return new GiftNumbers(null, null);
+        Matcher matcher = GIFT_NAME_PATTERN.matcher(name);
+        if (matcher.find()) {
+            try {
+                return new GiftNumbers(
+                        Integer.parseInt(matcher.group(1)),
+                        Integer.parseInt(matcher.group(2))
+                );
+            } catch (Exception e) {
+                return new GiftNumbers(null, null);
+            }
+        }
+        return new GiftNumbers(null, null);
+    }
+
     private String normalizeEventType(String rawType) {
         return rawType == null ? "UNKNOWN" : rawType.toLowerCase();
     }
@@ -95,4 +112,6 @@ public class EventMapper {
             return "0";
         }
     }
+
+    public record GiftNumbers(Integer serialNumber, Integer totalLimit) {}
 }
