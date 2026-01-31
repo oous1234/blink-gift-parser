@@ -9,7 +9,6 @@ import jakarta.persistence.EntityNotFoundException;
 import jakarta.persistence.NoResultException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.http.HttpStatus;
@@ -26,15 +25,17 @@ public class GlobalExceptionHandler {
 
     private final MessageService messageService;
     private final ErrorResponseBuilder errorResponseBuilder;
-    private final boolean enableStacktrace;
 
-    public GlobalExceptionHandler(
-            @Value("${server.error.include-stacktrace}") String includeStacktrace,
-            @Autowired MessageService messageService
-    ) {
-        this.enableStacktrace = "always".equals(includeStacktrace);
+    // @Value("${server.error.include-stacktrace:never}")
+    private String includeStacktrace = "never";
+
+    public GlobalExceptionHandler(MessageService messageService) {
         this.messageService = messageService;
         this.errorResponseBuilder = new ErrorResponseBuilder(messageService);
+    }
+
+    private boolean isStacktraceEnabled() {
+        return "always".equals(includeStacktrace);
     }
 
     @ExceptionHandler(InformationException.class)
@@ -59,7 +60,7 @@ public class GlobalExceptionHandler {
                         .informative(true)
                         .level(exception.getLevel())
                         .message(description)
-                        .stacktrace(enableStacktrace ? exception.getStackTrace() : null)
+                        .stacktrace(isStacktraceEnabled() ? exception.getStackTrace() : null)
                         .build(),
                 HttpStatus.INTERNAL_SERVER_ERROR
         );
@@ -83,7 +84,7 @@ public class GlobalExceptionHandler {
                 ErrorResponseDto.builder()
                         .informative(false)
                         .message(description)
-                        .stacktrace(enableStacktrace ? exception.getStackTrace() : null)
+                        .stacktrace(isStacktraceEnabled() ? exception.getStackTrace() : null)
                         .build(),
                 HttpStatus.INTERNAL_SERVER_ERROR
         );

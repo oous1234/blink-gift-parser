@@ -1,6 +1,5 @@
 package com.ceawse.blinkgift.dto;
 
-import com.ceawse.blinkgift.dto.GetGemsItemDto;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Data;
 import java.util.List;

@@ -4,6 +4,14 @@ spring:
   data:
     mongodb:
       uri: mongodb://localhost:27017/main
+    redis:
+      host: localhost
+      port: 6379
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 2
   cloud:
     openfeign:
       okhttp:
