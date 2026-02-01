@@ -1,5 +1,6 @@
 package com.ceawse.giftdiscovery.service.impl;
 
+import com.ceawse.giftdiscovery.dto.MarketAttributeDataDto;
 import com.ceawse.giftdiscovery.model.read.CollectionAttributeDocument;
 import com.ceawse.giftdiscovery.model.read.CollectionRegistryDocument;
 import com.ceawse.giftdiscovery.model.read.CollectionStatisticsDocument;
@@ -9,24 +10,19 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Service;
-
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class MarketDataServiceImpl implements MarketDataService {
-
     private final MongoTemplate mongoTemplate;
     private final MarketDataRedisRepository redisRepository;
 
     @Override
     public void refreshCache() {
         log.info("Starting global market data synchronization to Redis...");
-
         try {
             List<CollectionStatisticsDocument> stats = mongoTemplate.findAll(CollectionStatisticsDocument.class);
             stats.forEach(s -> {
@@ -45,8 +41,15 @@ public class MarketDataServiceImpl implements MarketDataService {
                             a.getPrice()
                     );
                 }
+                if (a.getItemsCount() != null) {
+                    redisRepository.saveAttributeCount(
+                            a.getCollectionAddress(),
+                            a.getTraitType(),
+                            a.getValue(),
+                            a.getItemsCount()
+                    );
+                }
             });
-
             log.info("Successfully synced {} collections and {} attributes to Redis", stats.size(), attrs.size());
         } catch (Exception e) {
             log.error("Critical error during Redis synchronization", e);
@@ -58,11 +61,8 @@ public class MarketDataServiceImpl implements MarketDataService {
         if (providedAddress != null && (providedAddress.startsWith("EQ") || providedAddress.length() == 36)) {
             return providedAddress;
         }
-
         if (giftName == null) return providedAddress;
-
         String baseName = giftName.split("#")[0].trim().toLowerCase().replaceAll("[\\s\\-']", "");
-
         return mongoTemplate.findAll(CollectionRegistryDocument.class).stream()
                 .filter(c -> normalize(c.getName()).equals(baseName) || normalize(c.getName()).equals(baseName + "s"))
                 .map(CollectionRegistryDocument::getAddress)
@@ -81,8 +81,9 @@ public class MarketDataServiceImpl implements MarketDataService {
     }
 
     @Override
-    public com.ceawse.giftdiscovery.dto.MarketAttributeDataDto getAttributeData(String collectionAddress, String traitType, String value) {
+    public MarketAttributeDataDto getAttributeData(String collectionAddress, String traitType, String value) {
         BigDecimal price = redisRepository.getAttributePrice(collectionAddress, traitType, value);
-        return new com.ceawse.giftdiscovery.dto.MarketAttributeDataDto(price, 0);
+        Integer count = redisRepository.getAttributeCount(collectionAddress, traitType, value);
+        return new MarketAttributeDataDto(price, count);
     }
 }
