@@ -8,80 +8,102 @@ import com.ceawse.giftdiscovery.repository.UniqueGiftRepository;
 import com.ceawse.giftdiscovery.service.DiscoveryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.BinaryOperator;
-import java.util.stream.Collectors;
+import java.util.UUID;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class DiscoveryServiceImpl implements DiscoveryService {
-
     private final UniqueGiftRepository uniqueGiftRepository;
     private final ProcessorStateRepository stateRepository;
     private final MongoTemplate mongoTemplate;
 
-    private static final int BATCH_SIZE = 2000;
+    private static final int BATCH_SIZE = 1000;
     private static final String ID_REGISTRY = "DISCOVERY_REGISTRY";
     private static final String ID_HISTORY = "DISCOVERY_HISTORY";
 
     @Override
     public void processRegistryStream() {
-        ProcessorState state = getState(ID_REGISTRY);
-        Instant lastTime = Instant.ofEpochMilli(state.getLastProcessedTimestamp());
+        String traceId = UUID.randomUUID().toString().substring(0, 8);
+        MDC.put("traceId", "DSC-" + traceId);
+        MDC.put("context", "REGISTRY");
 
-        Query query = new Query(Criteria.where("lastSeenAt").gt(lastTime))
-                .with(Sort.by(Sort.Direction.ASC, "lastSeenAt"))
-                .limit(BATCH_SIZE);
+        try {
+            ProcessorState state = getState(ID_REGISTRY);
+            Instant lastTime = Instant.ofEpochMilli(state.getLastProcessedTimestamp());
 
-        List<ItemRegistryDocument> items = mongoTemplate.find(query, ItemRegistryDocument.class);
-        if (items.isEmpty()) return;
+            log.debug("Checking Registry stream since: {}", lastTime);
 
-        log.info("Registry Stream: Processing {} items...", items.size());
-        uniqueGiftRepository.bulkUpsertFromRegistry(items);
+            Query query = new Query(Criteria.where("lastSeenAt").gt(lastTime))
+                    .with(Sort.by(Sort.Direction.ASC, "lastSeenAt"))
+                    .limit(BATCH_SIZE);
 
-        long maxTime = items.stream()
-                .mapToLong(i -> i.getLastSeenAt().toEpochMilli())
-                .max()
-                .orElse(state.getLastProcessedTimestamp());
+            List<ItemRegistryDocument> items = mongoTemplate.find(query, ItemRegistryDocument.class);
+            if (items.isEmpty()) return;
 
-        saveState(state, maxTime);
+            log.info("Discovered {} items from Registry. Performing bulk upsert...", items.size());
+            uniqueGiftRepository.bulkUpsertFromRegistry(items);
+
+            long maxTime = items.stream()
+                    .mapToLong(i -> i.getLastSeenAt().toEpochMilli())
+                    .max()
+                    .orElse(state.getLastProcessedTimestamp());
+
+            saveState(state, maxTime);
+            log.info("Registry discovery batch finished. New timestamp: {}", maxTime);
+
+        } catch (Exception e) {
+            log.error("Registry discovery failed: {}", e.getMessage(), e);
+        } finally {
+            MDC.clear();
+        }
     }
 
     @Override
     public void processHistoryStream() {
-        ProcessorState state = getState(ID_HISTORY);
+        String traceId = UUID.randomUUID().toString().substring(0, 8);
+        MDC.put("traceId", "DSC-" + traceId);
+        MDC.put("context", "HISTORY");
 
-        Query query = new Query(Criteria.where("timestamp").gt(state.getLastProcessedTimestamp()))
-                .with(Sort.by(Sort.Direction.ASC, "timestamp"))
-                .limit(BATCH_SIZE);
+        try {
+            ProcessorState state = getState(ID_HISTORY);
+            log.debug("Checking History stream since timestamp: {}", state.getLastProcessedTimestamp());
 
-        List<GiftHistoryDocument> events = mongoTemplate.find(query, GiftHistoryDocument.class);
-        if (events.isEmpty()) return;
+            Query query = new Query(Criteria.where("timestamp").gt(state.getLastProcessedTimestamp()))
+                    .with(Sort.by(Sort.Direction.ASC, "timestamp"))
+                    .limit(BATCH_SIZE);
 
-        log.info("History Stream: Processing {} events...", events.size());
+            List<GiftHistoryDocument> events = mongoTemplate.find(query, GiftHistoryDocument.class);
+            if (events.isEmpty()) return;
 
-        // Оптимизированная дедупликация
-        List<GiftHistoryDocument> uniqueEvents = deduplicateEvents(events);
+            log.info("Discovered {} events from History. Deduplicating...", events.size());
+            List<GiftHistoryDocument> uniqueEvents = deduplicateEvents(events);
 
-        uniqueGiftRepository.bulkUpsertFromHistory(uniqueEvents);
+            uniqueGiftRepository.bulkUpsertFromHistory(uniqueEvents);
 
-        long maxTime = events.getLast().getTimestamp();
-        saveState(state, maxTime);
+            long maxTime = events.get(events.size() - 1).getTimestamp();
+            saveState(state, maxTime);
+            log.info("History discovery batch finished. Processed {} events. New timestamp: {}", events.size(), maxTime);
+
+        } catch (Exception e) {
+            log.error("History discovery failed: {}", e.getMessage(), e);
+        } finally {
+            MDC.clear();
+        }
     }
 
     private List<GiftHistoryDocument> deduplicateEvents(List<GiftHistoryDocument> events) {
-        // Оставляем только последнее событие для каждого адреса
         Map<String, GiftHistoryDocument> map = new HashMap<>();
         for (GiftHistoryDocument ev : events) {
             if (ev.getAddress() != null) {

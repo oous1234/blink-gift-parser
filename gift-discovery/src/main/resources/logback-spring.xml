@@ -2,11 +2,7 @@
 <configuration>
     <conversionRule conversionWord="clr" converterClass="org.springframework.boot.logging.logback.ColorConverter" />
 
-    <!-- Паттерн: дата, уровень, поток, логгер и само сообщение -->
-    <property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{39} : %msg%n"/>
-
-    <!-- Путь к файлу. Если запускаешь из IDE, logs создастся в корне модуля.
-         Чтобы было в корне проекта, используй ../logs/ -->
+    <property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %clr(%5p) %clr([%X{traceId:-no-id}]){yellow} %clr([%X{context:-SYSTEM}]){magenta} %clr(%-40.40logger{39}){cyan} : %m%n"/>
     <property name="LOG_FILE" value="logs/gift-discovery.log" />
 
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
@@ -34,4 +30,5 @@
     </root>
 
     <logger name="com.ceawse.giftdiscovery" level="DEBUG" />
+    <logger name="org.springframework.data.mongodb.core.MongoTemplate" level="WARN" />
 </configuration>

@@ -4,26 +4,24 @@ import com.ceawse.blinkgift.client.GetGemsApiClient;
 import com.ceawse.blinkgift.client.IndexerApiClient;
 import com.ceawse.blinkgift.domain.CollectionAttributeDocument;
 import com.ceawse.blinkgift.domain.CollectionStatisticsDocument;
-import com.ceawse.blinkgift.dto.GetGemsAttributesDto;
-import com.ceawse.blinkgift.dto.GetGemsCollectionStatsDto;
 import com.ceawse.blinkgift.repository.CollectionAttributeRepository;
 import com.ceawse.blinkgift.repository.CollectionStatisticsRepository;
 import com.ceawse.blinkgift.service.CollectionService;
-import feign.FeignException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class CollectionServiceImpl implements CollectionService {
-
     private final IndexerApiClient indexerClient;
     private final GetGemsApiClient getGemsClient;
     private final CollectionAttributeRepository attributeRepository;
@@ -31,71 +29,75 @@ public class CollectionServiceImpl implements CollectionService {
 
     @Override
     public void updateAllCollectionsAttributes() {
-        log.info("Start updating attributes...");
+        String traceId = UUID.randomUUID().toString().substring(0, 8);
+        MDC.put("traceId", "ATTR-" + traceId);
+        log.info("Starting collection attributes update cycle");
+
         try {
             var collections = indexerClient.getCollections();
             for (var col : collections) {
+                MDC.put("context", col.address);
                 processAttributes(col.address);
-                Thread.sleep(200); // Rate limiter friendly
+                Thread.sleep(300);
             }
         } catch (Exception e) {
-            log.error("Error updating attributes cycle", e);
+            log.error("Error in attributes update cycle: {}", e.getMessage(), e);
+        } finally {
+            MDC.clear();
         }
     }
 
     @Override
     public void updateAllCollectionsStatistics() {
-        log.info("Start updating statistics...");
+        String traceId = UUID.randomUUID().toString().substring(0, 8);
+        MDC.put("traceId", "STAT-" + traceId);
+        log.info("Starting collection statistics update cycle");
+
         try {
             var collections = indexerClient.getCollections();
             for (var col : collections) {
+                MDC.put("context", col.address);
                 processStatistics(col.address);
-                Thread.sleep(200);
+                Thread.sleep(300);
             }
         } catch (Exception e) {
-            log.error("Error updating statistics cycle", e);
+            log.error("Error in statistics update cycle: {}", e.getMessage(), e);
+        } finally {
+            MDC.clear();
         }
     }
 
     private void processAttributes(String collectionAddress) {
         try {
             var response = getGemsClient.getAttributes(collectionAddress);
-            if (response == null || !response.isSuccess() ||
-                    response.getResponse() == null || response.getResponse().getAttributes() == null) {
-                return;
-            }
+            if (response == null || !response.isSuccess() || response.getResponse() == null) return;
 
-            List<CollectionAttributeDocument> documentsToSave = new ArrayList<>();
+            List<CollectionAttributeDocument> docs = new ArrayList<>();
             Instant now = Instant.now();
+            var categories = response.getResponse().getAttributes();
 
-            for (var category : response.getResponse().getAttributes()) {
-                String traitType = category.getTraitType();
+            if (categories == null) return;
+
+            for (var category : categories) {
                 if (category.getValues() == null) continue;
-
                 for (var val : category.getValues()) {
-                    Long priceNano = parseLongSafe(val.getMinPriceNano());
-                    BigDecimal price = parseBigDecimalSafe(val.getMinPrice());
-
-                    documentsToSave.add(CollectionAttributeDocument.builder()
-                            .id(CollectionAttributeDocument.generateId(collectionAddress, traitType, val.getValue()))
+                    docs.add(CollectionAttributeDocument.builder()
+                            .id(CollectionAttributeDocument.generateId(collectionAddress, category.getTraitType(), val.getValue()))
                             .collectionAddress(collectionAddress)
-                            .traitType(traitType)
+                            .traitType(category.getTraitType())
                             .value(val.getValue())
-                            .price(price)
-                            .priceNano(priceNano)
-                            .currency("TON")
+                            .price(parseBigDecimal(val.getMinPrice()))
                             .itemsCount(val.getCount())
                             .updatedAt(now)
                             .build());
                 }
             }
-
-            if (!documentsToSave.isEmpty()) {
-                attributeRepository.saveAll(documentsToSave);
-                log.debug("Updated {} attributes for {}", documentsToSave.size(), collectionAddress);
+            if (!docs.isEmpty()) {
+                attributeRepository.saveAll(docs);
+                log.debug("Updated {} attributes", docs.size());
             }
         } catch (Exception e) {
-            log.error("Failed to parse attributes for {}", collectionAddress, e);
+            log.error("Failed to update attributes: {}", e.getMessage());
         }
     }
 
@@ -105,43 +107,20 @@ public class CollectionServiceImpl implements CollectionService {
             if (dto == null || !dto.isSuccess() || dto.getResponse() == null) return;
 
             var stats = dto.getResponse();
-            Long floorNano = parseLongSafe(stats.getFloorPriceNano());
-            BigDecimal floor = null;
-
-            if (floorNano != null) {
-                floor = BigDecimal.valueOf(floorNano).divide(BigDecimal.valueOf(1_000_000_000));
-            } else if (stats.getFloorPrice() != null) {
-                floor = parseBigDecimalSafe(stats.getFloorPrice());
-                if (floor != null) {
-                    floorNano = floor.multiply(BigDecimal.valueOf(1_000_000_000)).longValue();
-                }
-            }
-
             CollectionStatisticsDocument doc = CollectionStatisticsDocument.builder()
                     .collectionAddress(address)
-                    .itemsCount(stats.getItemsCount() != null ? stats.getItemsCount() : 0)
-                    .ownersCount(stats.getOwnersCount() != null ? stats.getOwnersCount() : 0)
-                    .floorPrice(floor)
-                    .floorPriceNano(floorNano)
+                    .floorPrice(parseBigDecimal(stats.getFloorPrice()))
+                    .itemsCount(stats.getItemsCount())
                     .updatedAt(Instant.now())
                     .build();
-
             statisticsRepository.save(doc);
-
-        } catch (FeignException.NotFound e) {
-            log.warn("Collection not found on GetGems: {}", address);
+            log.debug("Statistics updated: Floor={} TON", stats.getFloorPrice());
         } catch (Exception e) {
-            log.error("Failed to update stats for {}", address, e);
+            log.error("Failed to update statistics: {}", e.getMessage());
         }
     }
 
-    private Long parseLongSafe(String val) {
-        if (val == null) return null;
-        try { return Long.parseLong(val); } catch (NumberFormatException e) { return null; }
-    }
-
-    private BigDecimal parseBigDecimalSafe(String val) {
-        if (val == null) return null;
-        try { return new BigDecimal(val); } catch (Exception e) { return null; }
+    private BigDecimal parseBigDecimal(String val) {
+        try { return val != null ? new BigDecimal(val) : null; } catch (Exception e) { return null; }
     }
 }

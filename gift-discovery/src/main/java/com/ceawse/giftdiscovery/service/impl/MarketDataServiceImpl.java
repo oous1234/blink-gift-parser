@@ -8,10 +8,13 @@ import com.ceawse.giftdiscovery.repository.redis.MarketDataRedisRepository;
 import com.ceawse.giftdiscovery.service.MarketDataService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Service;
+
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 
 @Slf4j
 @Service
@@ -22,37 +25,36 @@ public class MarketDataServiceImpl implements MarketDataService {
 
     @Override
     public void refreshCache() {
-        log.info("Starting global market data synchronization to Redis...");
+        MDC.put("traceId", "REDIS-" + UUID.randomUUID().toString().substring(0, 8));
+        MDC.put("context", "SYNC");
+        log.info("Starting market data synchronization from MongoDB to Redis...");
+
         try {
             List<CollectionStatisticsDocument> stats = mongoTemplate.findAll(CollectionStatisticsDocument.class);
-            stats.forEach(s -> {
+            int statsCount = 0;
+            for (var s : stats) {
                 if (s.getFloorPrice() != null) {
                     redisRepository.saveCollectionFloor(s.getCollectionAddress(), s.getFloorPrice());
+                    statsCount++;
                 }
-            });
+            }
 
             List<CollectionAttributeDocument> attrs = mongoTemplate.findAll(CollectionAttributeDocument.class);
-            attrs.forEach(a -> {
+            int attrCount = 0;
+            for (var a : attrs) {
                 if (a.getPrice() != null) {
-                    redisRepository.saveAttributePrice(
-                            a.getCollectionAddress(),
-                            a.getTraitType(),
-                            a.getValue(),
-                            a.getPrice()
-                    );
+                    redisRepository.saveAttributePrice(a.getCollectionAddress(), a.getTraitType(), a.getValue(), a.getPrice());
                 }
                 if (a.getItemsCount() != null) {
-                    redisRepository.saveAttributeCount(
-                            a.getCollectionAddress(),
-                            a.getTraitType(),
-                            a.getValue(),
-                            a.getItemsCount()
-                    );
+                    redisRepository.saveAttributeCount(a.getCollectionAddress(), a.getTraitType(), a.getValue(), a.getItemsCount());
                 }
-            });
-            log.info("Successfully synced {} collections and {} attributes to Redis", stats.size(), attrs.size());
+                attrCount++;
+            }
+            log.info("Redis Sync Completed: {} collections floors, {} attributes data entries", statsCount, attrCount);
         } catch (Exception e) {
-            log.error("Critical error during Redis synchronization", e);
+            log.error("Redis synchronization failed: {}", e.getMessage(), e);
+        } finally {
+            MDC.clear();
         }
     }
 
@@ -62,12 +64,20 @@ public class MarketDataServiceImpl implements MarketDataService {
             return providedAddress;
         }
         if (giftName == null) return providedAddress;
-        String baseName = giftName.split("#")[0].trim().toLowerCase().replaceAll("[\\s\\-']", "");
-        return mongoTemplate.findAll(CollectionRegistryDocument.class).stream()
-                .filter(c -> normalize(c.getName()).equals(baseName) || normalize(c.getName()).equals(baseName + "s"))
+
+        String baseName = giftName.split("#")[0].trim();
+        log.trace("Resolving collection address for gift name: {}", baseName);
+
+        String resolved = mongoTemplate.findAll(CollectionRegistryDocument.class).stream()
+                .filter(c -> normalize(c.getName()).equals(normalize(baseName)) || normalize(c.getName()).equals(normalize(baseName + "s")))
                 .map(CollectionRegistryDocument::getAddress)
                 .findFirst()
                 .orElse(providedAddress);
+
+        if (resolved != null && !resolved.equals(providedAddress)) {
+            log.debug("Collection resolved: {} -> {}", baseName, resolved);
+        }
+        return resolved;
     }
 
     private String normalize(String input) {

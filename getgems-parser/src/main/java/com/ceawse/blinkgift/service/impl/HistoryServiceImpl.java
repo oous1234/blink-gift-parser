@@ -13,7 +13,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
+
 import java.util.List;
+import java.util.UUID;
 
 @Slf4j
 @Service
@@ -30,27 +32,42 @@ public class HistoryServiceImpl implements HistoryService {
 
     @Override
     public void fetchRealtimeEvents() {
+        String traceId = UUID.randomUUID().toString().substring(0, 8);
+        MDC.put("traceId", traceId);
+        MDC.put("context", "REALTIME");
+
         try {
             long lastTime = stateService.getState(PROCESS_ID).getLastProcessedTimestamp();
             if (lastTime == 0) lastTime = System.currentTimeMillis() - 60_000;
 
-            log.debug("Polling GetGems history since: {}", lastTime);
+            log.debug("Polling GetGems history. Since timestamp: {}", lastTime);
+
             GetGemsHistoryDto response = apiClient.getHistory(lastTime, null, 50, null, TARGET_TYPES, false);
 
-            if (response == null || !response.isSuccess() || response.getResponse().getItems().isEmpty()) {
+            if (response == null || !response.isSuccess() || response.getResponse() == null) {
+                log.warn("GetGems API returned unsuccessful response or null");
                 return;
             }
 
             var items = response.getResponse().getItems();
-            log.info("Found {} new events in GetGems history", items.size());
+            if (items == null || items.isEmpty()) {
+                log.trace("No new events in GetGems history since {}", lastTime);
+                return;
+            }
 
+            log.info("Processing {} new history events", items.size());
+
+            int savedCount = 0;
             for (var item : items) {
-                // Устанавливаем адрес в MDC, чтобы все логи внутри этого цикла были помечены
-                MDC.put("giftAddr", item.getAddress());
+                MDC.put("context", item.getAddress());
                 try {
-                    processSingleEvent(item);
+                    if (processSingleEvent(item)) {
+                        savedCount++;
+                    }
+                } catch (Exception e) {
+                    log.error("Failed to process event hash={}: {}", item.getHash(), e.getMessage(), e);
                 } finally {
-                    MDC.remove("giftAddr"); // Обязательно чистим
+                    MDC.put("context", "REALTIME");
                 }
             }
 
@@ -58,33 +75,38 @@ public class HistoryServiceImpl implements HistoryService {
                     .mapToLong(i -> i.getTimestamp() != null ? i.getTimestamp() : 0L)
                     .max()
                     .orElse(lastTime);
+
             stateService.updateState(PROCESS_ID, maxTimestamp, null);
+            log.debug("Poll cycle finished. Saved {}/{} items. New lastTimestamp: {}", savedCount, items.size(), maxTimestamp);
 
         } catch (Exception e) {
-            log.error("Critical error in realtime parser: {}", e.getMessage(), e);
+            log.error("Critical error in history service cycle: {}", e.getMessage(), e);
+        } finally {
+            MDC.clear();
         }
     }
 
-    private void processSingleEvent(GetGemsItemDto item) {
-        if (!repository.existsByHash(item.getHash())) {
-            repository.save(mapper.toHistoryEntity(item));
-            log.debug("Event {} saved to history database", item.getHash());
-        } else {
-            log.trace("Event {} already exists, skipping save", item.getHash());
+    private boolean processSingleEvent(GetGemsItemDto item) {
+        if (repository.existsByHash(item.getHash())) {
+            log.trace("Event already exists in DB: {}", item.getHash());
+            return false;
         }
 
+        repository.save(mapper.toHistoryEntity(item));
+        log.debug("Saved new event: [Type: {}] [Hash: {}]",
+                (item.getTypeData() != null ? item.getTypeData().getType() : "UNKNOWN"),
+                item.getHash());
+
         if (item.getTypeData() != null && "putUpForSale".equals(item.getTypeData().getType())) {
-            log.info("New listing detected: {}. Price: {} {}", item.getName(),
-                    item.getTypeData().getPrice(), item.getTypeData().getCurrency());
+            log.info("New listing detected: {} ({} TON)", item.getName(), item.getTypeData().getPrice());
             processNewListing(item);
         }
+        return true;
     }
 
     private void processNewListing(GetGemsItemDto historyItem) {
         try {
-            log.debug("Enriching listing data from API for discovery...");
             var detailResponse = apiClient.getNftDetails(historyItem.getAddress());
-
             if (detailResponse == null || !detailResponse.isSuccess() || detailResponse.getResponse() == null) {
                 log.warn("Could not fetch NFT details for enrichment: {}", historyItem.getAddress());
                 return;
@@ -93,16 +115,16 @@ public class HistoryServiceImpl implements HistoryService {
             var details = detailResponse.getResponse();
             var numbers = mapper.parseNumbers(details.getName());
 
-            String model = null, backdrop = null, symbol = null;
+            // Собираем атрибуты для лога
+            String model = null, backdrop = null;
             if (details.getAttributes() != null) {
                 for (var attr : details.getAttributes()) {
                     if ("Model".equalsIgnoreCase(attr.getTraitType())) model = attr.getValue();
                     if ("Backdrop".equalsIgnoreCase(attr.getTraitType())) backdrop = attr.getValue();
-                    if ("Symbol".equalsIgnoreCase(attr.getTraitType())) symbol = attr.getValue();
                 }
             }
 
-            log.info("Sending enrichment request to gift-discovery. Model: {}, Backdrop: {}", model, backdrop);
+            log.debug("Sending enrichment request. Model: {}, Backdrop: {}", model, backdrop);
 
             discoveryClient.enrich(DiscoveryInternalClient.EnrichmentRequest.builder()
                     .id(details.getAddress())
@@ -112,14 +134,11 @@ public class HistoryServiceImpl implements HistoryService {
                     .totalLimit(numbers.totalLimit())
                     .model(model)
                     .backdrop(backdrop)
-                    .symbol(symbol)
                     .timestamp(historyItem.getTimestamp())
                     .build());
 
-            log.debug("Enrichment request successfully sent to discovery service");
-
         } catch (Exception e) {
-            log.error("Real-time enrichment failed: {}", e.getMessage());
+            log.error("Real-time enrichment failed for {}: {}", historyItem.getAddress(), e.getMessage());
         }
     }
 }
