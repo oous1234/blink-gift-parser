@@ -1,6 +1,7 @@
 package com.ceawse.blinkgift.service;
 
-import com.blinkgift.parser.getgems.model.IngestionState;
+
+import com.ceawse.blinkgift.model.IngestionState;
 
 public interface StateService {
     IngestionState getState(String processId);

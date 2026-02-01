@@ -1,4 +1,4 @@
-package com.blinkgift.parser.getgems.model;
+package com.ceawse.blinkgift.model;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;

@@ -1,6 +1,6 @@
 package com.ceawse.blinkgift.service.impl;
 
-import com.blinkgift.parser.getgems.model.IngestionState;
+import com.ceawse.blinkgift.model.IngestionState;
 import com.ceawse.blinkgift.repository.IngestionStateRepository;
 import com.ceawse.blinkgift.service.StateService;
 import lombok.RequiredArgsConstructor;
