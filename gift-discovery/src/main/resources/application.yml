@@ -24,16 +24,6 @@ server:
   error:
     include-stacktrace: newer
 
-logging:
-  level:
-    com.ceawse.giftdiscovery: INFO`
-    org.springframework.web: INFO
-    org.apache.coyote: INFO
-
-  pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
-    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
-
 feign:
   client:
     config:

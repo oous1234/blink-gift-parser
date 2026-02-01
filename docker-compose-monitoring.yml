@@ -10,26 +10,26 @@ services:
       - 8888:8080
     restart: unless-stopped
 
-  # Прокси для логов getgems-parser
+  # Контейнер-прокси для лога GetGems
   log-getgems:
     image: alpine
-    container_name: parser-getgems # Так он будет называться в Dozzle
+    container_name: parser-getgems
     volumes:
-      - ./logs/getgems-parser.log:/var/log/app.log
-    command: tail -f /var/log/app.log
+      - ./logs:/var/log/my-app-logs # Монтируем папку logs целиком
+    command: tail -f /var/log/my-app-logs/getgems-parser.log
 
-  # Прокси для логов gift-discovery
+  # Контейнер-прокси для лога Discovery
   log-discovery:
     image: alpine
     container_name: discovery-service
     volumes:
-      - ./logs/gift-discovery.log:/var/log/app.log
-    command: tail -f /var/log/app.log
+      - ./logs:/var/log/my-app-logs # Монтируем папку logs целиком
+    command: tail -f /var/log/my-app-logs/gift-discovery.log
 
-  # Прокси для логов portals-parser
+  # Контейнер-прокси для лога Portals
   log-portals:
     image: alpine
     container_name: parser-portals
     volumes:
-      - ./logs/portals-parser.log:/var/log/app.log
-    command: tail -f /var/log/app.log
+      - ./logs:/var/log/my-app-logs # Монтируем папку logs целиком
+    command: tail -f /var/log/my-app-logs/portals-parser.log
