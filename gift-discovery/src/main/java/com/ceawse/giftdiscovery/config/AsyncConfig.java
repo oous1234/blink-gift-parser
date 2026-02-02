@@ -18,7 +18,6 @@ public class AsyncConfig {
 
     @Bean(name = "virtualThreadExecutor")
     public ExecutorService virtualThreadExecutor() {
-        // Мы оборачиваем стандартный VirtualThreadExecutor, чтобы он пробрасывал MDC
         ExecutorService delegate = Executors.newVirtualThreadPerTaskExecutor();
 
         return new ExecutorServiceForwardingMdc(delegate);

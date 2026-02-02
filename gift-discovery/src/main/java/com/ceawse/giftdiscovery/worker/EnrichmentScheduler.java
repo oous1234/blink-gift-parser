@@ -1,6 +1,5 @@
 package com.ceawse.giftdiscovery.worker;
 
-import com.ceawse.giftdiscovery.service.AttributeEnrichmentService;
 import com.ceawse.giftdiscovery.service.MarketDataService;
 import com.ceawse.giftdiscovery.service.PriceEstimationService;
 import lombok.RequiredArgsConstructor;
@@ -13,7 +12,6 @@ public class EnrichmentScheduler {
 
     private final MarketDataService marketDataService;
     private final PriceEstimationService priceEstimationService;
-    private final AttributeEnrichmentService attributeEnrichmentService;
 
     @Scheduled(fixedDelay = 60000)
     public void refreshCache() {
@@ -25,8 +23,4 @@ public class EnrichmentScheduler {
         priceEstimationService.estimateGiftPrices();
     }
 
-    @Scheduled(fixedDelay = 1000)
-    public void fetchAttributes() {
-        attributeEnrichmentService.enrichMissingAttributes();
-    }
 }

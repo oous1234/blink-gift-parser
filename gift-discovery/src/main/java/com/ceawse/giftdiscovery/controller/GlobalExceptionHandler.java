@@ -26,7 +26,6 @@ public class GlobalExceptionHandler {
     private final MessageService messageService;
     private final ErrorResponseBuilder errorResponseBuilder;
 
-    // @Value("${server.error.include-stacktrace:never}")
     private String includeStacktrace = "never";
 
     public GlobalExceptionHandler(MessageService messageService) {

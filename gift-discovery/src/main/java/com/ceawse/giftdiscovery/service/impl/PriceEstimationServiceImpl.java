@@ -1,6 +1,5 @@
 package com.ceawse.giftdiscovery.service.impl;
 
-import com.ceawse.giftdiscovery.dto.MarketAttributeDataDto;
 import com.ceawse.giftdiscovery.model.UniqueGiftDocument;
 import com.ceawse.giftdiscovery.service.MarketDataService;
 import com.ceawse.giftdiscovery.service.PriceEstimationService;
@@ -32,92 +31,62 @@ public class PriceEstimationServiceImpl implements PriceEstimationService {
 
     @Override
     public void estimateGiftPrices() {
-        Query query = new Query(Criteria.where("attributes").exists(true)
-                .and("marketData.estimatedPrice").exists(false))
+        // Ищем подарки, которые либо не оценены, либо оценка устарела (например, старше 1 часа)
+        Instant oneHourAgo = Instant.now().minusSeconds(3600);
+
+        Query query = new Query(Criteria.where("marketData.priceUpdatedAt").lt(oneHourAgo))
                 .limit(BATCH_SIZE);
 
         List<UniqueGiftDocument> gifts = mongoTemplate.find(query, UniqueGiftDocument.class);
 
         if (gifts.isEmpty()) return;
 
-        log.info("Estimating prices for {} gifts...", gifts.size());
+        log.info("Updating price estimations for {} gifts...", gifts.size());
 
         BulkOperations bulkOps = mongoTemplate.bulkOps(BulkOperations.BulkMode.UNORDERED, UniqueGiftDocument.class);
         int updatesCount = 0;
 
         for (UniqueGiftDocument gift : gifts) {
-            String collectionAddress = marketDataService.resolveCollectionAddress(gift.getName(), gift.getCollectionAddress());
-            if (collectionAddress == null) continue;
+            try {
+                String colAddr = gift.getCollectionAddress();
+                if (colAddr == null) {
+                    colAddr = marketDataService.resolveCollectionAddress(gift.getName(), null);
+                }
 
-            BigDecimal floorPrice = marketDataService.getCollectionFloor(collectionAddress);
-            UniqueGiftDocument.GiftAttributes attrs = gift.getAttributes();
+                if (colAddr == null) continue;
 
-            enrichAttributeMarketData(attrs, collectionAddress);
+                BigDecimal collectionFloor = marketDataService.getCollectionFloor(colAddr);
+                var modelData = marketDataService.getAttributeData(colAddr, "Model", gift.getModel());
+                var backdropData = marketDataService.getAttributeData(colAddr, "Backdrop", gift.getBackdrop());
 
-            BigDecimal estimatedPrice = calculatePrice(floorPrice, attrs);
+                BigDecimal modelFloor = (modelData != null && modelData.getPrice() != null) ? modelData.getPrice() : collectionFloor;
+                BigDecimal backdropFloor = (backdropData != null && backdropData.getPrice() != null) ? backdropData.getPrice() : collectionFloor;
 
-            Update update = buildUpdate(collectionAddress, gift.getCollectionAddress(), attrs, floorPrice, estimatedPrice);
+                // Расчет оценки
+                BigDecimal estimatedPrice = collectionFloor.multiply(TWO)
+                        .add(modelFloor)
+                        .add(backdropFloor)
+                        .divide(FOUR, 2, RoundingMode.HALF_UP);
 
-            bulkOps.updateOne(new Query(Criteria.where("_id").is(gift.getId())), update);
-            updatesCount++;
+                // Обновляем только блок marketData
+                Update update = new Update()
+                        .set("collectionAddress", colAddr)
+                        .set("marketData.collectionFloorPrice", collectionFloor)
+                        .set("marketData.modelFloorPrice", modelFloor)
+                        .set("marketData.backdropFloorPrice", backdropFloor)
+                        .set("marketData.estimatedPrice", estimatedPrice)
+                        .set("marketData.priceUpdatedAt", Instant.now());
+
+                bulkOps.updateOne(new Query(Criteria.where("_id").is(gift.getId())), update);
+                updatesCount++;
+            } catch (Exception e) {
+                log.error("Failed to estimate price for gift {}: {}", gift.getId(), e.getMessage());
+            }
         }
 
         if (updatesCount > 0) {
             bulkOps.execute();
-            log.info("Price estimation completed. Updated: {}", updatesCount);
+            log.debug("Price estimation batch completed. Updated: {}", updatesCount);
         }
-    }
-
-    private void enrichAttributeMarketData(UniqueGiftDocument.GiftAttributes attrs, String collectionAddress) {
-        updateAttr(collectionAddress, "Model", attrs.getModel(),
-                attrs::setModelPrice, attrs::setModelRarityCount);
-        updateAttr(collectionAddress, "Backdrop", attrs.getBackdrop(),
-                attrs::setBackdropPrice, attrs::setBackdropRarityCount);
-        updateAttr(collectionAddress, "Symbol", attrs.getSymbol(),
-                attrs::setSymbolPrice, attrs::setSymbolRarityCount);
-    }
-
-    private void updateAttr(String colAddr, String type, String val,
-                            java.util.function.Consumer<BigDecimal> setPrice,
-                            java.util.function.Consumer<Integer> setCount) {
-        var data = marketDataService.getAttributeData(colAddr, type, val);
-        if (data != null) {
-            setPrice.accept(data.getPrice());
-            setCount.accept(data.getCount());
-        }
-    }
-
-    private BigDecimal calculatePrice(BigDecimal floor, UniqueGiftDocument.GiftAttributes attrs) {
-        BigDecimal modelP = attrs.getModelPrice() != null ? attrs.getModelPrice() : floor;
-        BigDecimal backdropP = attrs.getBackdropPrice() != null ? attrs.getBackdropPrice() : floor;
-
-        // Formula: (floor * 2 + model + backdrop) / 4
-        return floor.multiply(TWO)
-                .add(modelP)
-                .add(backdropP)
-                .divide(FOUR, 2, RoundingMode.HALF_UP);
-    }
-
-    private Update buildUpdate(String newColAddress, String oldColAddress,
-                               UniqueGiftDocument.GiftAttributes attrs,
-                               BigDecimal floor, BigDecimal estimated) {
-        Update update = new Update();
-
-        if (!newColAddress.equals(oldColAddress)) {
-            update.set("collectionAddress", newColAddress);
-        }
-
-        update.set("attributes.modelPrice", attrs.getModelPrice());
-        update.set("attributes.modelRarityCount", attrs.getModelRarityCount());
-        update.set("attributes.backdropPrice", attrs.getBackdropPrice());
-        update.set("attributes.backdropRarityCount", attrs.getBackdropRarityCount());
-        update.set("attributes.symbolPrice", attrs.getSymbolPrice());
-        update.set("attributes.symbolRarityCount", attrs.getSymbolRarityCount());
-
-        update.set("marketData.collectionFloorPrice", floor);
-        update.set("marketData.estimatedPrice", estimated);
-        update.set("marketData.priceUpdatedAt", Instant.now());
-
-        return update;
     }
 }

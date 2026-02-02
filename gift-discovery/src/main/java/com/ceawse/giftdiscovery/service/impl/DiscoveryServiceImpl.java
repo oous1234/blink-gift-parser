@@ -1,125 +1,104 @@
 package com.ceawse.giftdiscovery.service.impl;
 
-import com.ceawse.giftdiscovery.model.GiftHistoryDocument;
-import com.ceawse.giftdiscovery.model.ItemRegistryDocument;
-import com.ceawse.giftdiscovery.model.ProcessorState;
-import com.ceawse.giftdiscovery.repository.ProcessorStateRepository;
+import com.ceawse.giftdiscovery.client.GiftMetadataFeignClient;
+import com.ceawse.giftdiscovery.dto.MetadataResponseDto;
+import com.ceawse.giftdiscovery.model.UniqueGiftDocument;
 import com.ceawse.giftdiscovery.repository.UniqueGiftRepository;
 import com.ceawse.giftdiscovery.service.DiscoveryService;
+import com.ceawse.giftdiscovery.service.MarketDataService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.MDC;
-import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.Optional;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class DiscoveryServiceImpl implements DiscoveryService {
+
     private final UniqueGiftRepository uniqueGiftRepository;
-    private final ProcessorStateRepository stateRepository;
+    private final GiftMetadataFeignClient metadataClient;
+    private final MarketDataService marketDataService;
     private final MongoTemplate mongoTemplate;
 
-    private static final int BATCH_SIZE = 1000;
-    private static final String ID_REGISTRY = "DISCOVERY_REGISTRY";
-    private static final String ID_HISTORY = "DISCOVERY_HISTORY";
+    @Override
+    public UniqueGiftDocument getOrPopulateMetadata(String slug) {
+        Optional<UniqueGiftDocument> existing = uniqueGiftRepository.findById(slug);
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+
+        log.info("Gift {} not in registry. Fetching fresh metadata...", slug);
+        try {
+            int lastDash = slug.lastIndexOf("-");
+            if (lastDash == -1) throw new IllegalArgumentException("Invalid slug format");
+
+            String baseSlug = slug.substring(0, lastDash);
+            Integer giftId = Integer.parseInt(slug.substring(lastDash + 1));
+
+            MetadataResponseDto raw = metadataClient.getMetadata(baseSlug, giftId);
+
+            UniqueGiftDocument newGift = UniqueGiftDocument.builder()
+                    .id(slug)
+                    .name(raw.giftName())
+                    .giftNum(raw.giftNum())
+                    .giftMinted(raw.giftMinted())
+                    .giftTotal(raw.giftTotal())
+                    .model(raw.model())
+                    .modelRare(raw.modelRare())
+                    .backdrop(raw.backdrop())
+                    .backdropRare(raw.backdropRare())
+                    .symbol(raw.pattern())
+                    .symbolRare(raw.patternRare())
+                    .backdropCenterColor(raw.backdropCenterColor())
+                    .backdropEdgeColor(raw.backdropEdgeColor())
+                    .backdropPatternColor(raw.backdropPatternColor())
+                    .modelUrl(raw.modelUrl())
+                    .patternUrl(raw.patternUrl())
+                    .pageUrl(raw.pageUrl())
+                    .createdAt(Instant.now())
+                    .updatedAt(Instant.now())
+                    .build();
+
+            enrichWithMarketData(newGift);
+
+            return uniqueGiftRepository.save(newGift);
+
+        } catch (Exception e) {
+            log.error("Error populating gift {}: {}", slug, e.getMessage());
+            return null;
+        }
+    }
+
+    private void enrichWithMarketData(UniqueGiftDocument gift) {
+        String colAddr = marketDataService.resolveCollectionAddress(gift.getName(), null);
+        gift.setCollectionAddress(colAddr);
+
+        var modelData = marketDataService.getAttributeData(colAddr, "Model", gift.getModel());
+        var backdropData = marketDataService.getAttributeData(colAddr, "Backdrop", gift.getBackdrop());
+
+        UniqueGiftDocument.MarketData marketData = UniqueGiftDocument.MarketData.builder()
+                .collectionFloorPrice(marketDataService.getCollectionFloor(colAddr))
+                .modelFloorPrice(modelData != null ? modelData.getPrice() : null)
+                .backdropFloorPrice(backdropData != null ? backdropData.getPrice() : null)
+                .priceUpdatedAt(Instant.now())
+                .build();
+
+        marketData.setEstimatedPrice(marketData.getCollectionFloorPrice());
+
+        gift.setMarketData(marketData);
+    }
 
     @Override
     public void processRegistryStream() {
-        String traceId = UUID.randomUUID().toString().substring(0, 8);
-        MDC.put("traceId", "DSC-" + traceId);
-        MDC.put("context", "REGISTRY");
-
-        try {
-            ProcessorState state = getState(ID_REGISTRY);
-            Instant lastTime = Instant.ofEpochMilli(state.getLastProcessedTimestamp());
-
-            log.debug("Checking Registry stream since: {}", lastTime);
-
-            Query query = new Query(Criteria.where("lastSeenAt").gt(lastTime))
-                    .with(Sort.by(Sort.Direction.ASC, "lastSeenAt"))
-                    .limit(BATCH_SIZE);
-
-            List<ItemRegistryDocument> items = mongoTemplate.find(query, ItemRegistryDocument.class);
-            if (items.isEmpty()) return;
-
-            log.info("Discovered {} items from Registry. Performing bulk upsert...", items.size());
-            uniqueGiftRepository.bulkUpsertFromRegistry(items);
-
-            long maxTime = items.stream()
-                    .mapToLong(i -> i.getLastSeenAt().toEpochMilli())
-                    .max()
-                    .orElse(state.getLastProcessedTimestamp());
-
-            saveState(state, maxTime);
-            log.info("Registry discovery batch finished. New timestamp: {}", maxTime);
-
-        } catch (Exception e) {
-            log.error("Registry discovery failed: {}", e.getMessage(), e);
-        } finally {
-            MDC.clear();
-        }
+        // Логика фоновой синхронизации реестра (если нужна)
     }
 
     @Override
     public void processHistoryStream() {
-        String traceId = UUID.randomUUID().toString().substring(0, 8);
-        MDC.put("traceId", "DSC-" + traceId);
-        MDC.put("context", "HISTORY");
-
-        try {
-            ProcessorState state = getState(ID_HISTORY);
-            log.debug("Checking History stream since timestamp: {}", state.getLastProcessedTimestamp());
-
-            Query query = new Query(Criteria.where("timestamp").gt(state.getLastProcessedTimestamp()))
-                    .with(Sort.by(Sort.Direction.ASC, "timestamp"))
-                    .limit(BATCH_SIZE);
-
-            List<GiftHistoryDocument> events = mongoTemplate.find(query, GiftHistoryDocument.class);
-            if (events.isEmpty()) return;
-
-            log.info("Discovered {} events from History. Deduplicating...", events.size());
-            List<GiftHistoryDocument> uniqueEvents = deduplicateEvents(events);
-
-            uniqueGiftRepository.bulkUpsertFromHistory(uniqueEvents);
-
-            long maxTime = events.get(events.size() - 1).getTimestamp();
-            saveState(state, maxTime);
-            log.info("History discovery batch finished. Processed {} events. New timestamp: {}", events.size(), maxTime);
-
-        } catch (Exception e) {
-            log.error("History discovery failed: {}", e.getMessage(), e);
-        } finally {
-            MDC.clear();
-        }
-    }
-
-    private List<GiftHistoryDocument> deduplicateEvents(List<GiftHistoryDocument> events) {
-        Map<String, GiftHistoryDocument> map = new HashMap<>();
-        for (GiftHistoryDocument ev : events) {
-            if (ev.getAddress() != null) {
-                map.merge(ev.getAddress(), ev,
-                        (oldV, newV) -> newV.getTimestamp() > oldV.getTimestamp() ? newV : oldV);
-            }
-        }
-        return List.copyOf(map.values());
-    }
-
-    private ProcessorState getState(String id) {
-        return stateRepository.findById(id).orElse(new ProcessorState(id, 0L, null));
-    }
-
-    private void saveState(ProcessorState state, long timestamp) {
-        state.setLastProcessedTimestamp(timestamp);
-        stateRepository.save(state);
+        // Логика фоновой обработки истории (если нужна)
     }
 }
