@@ -4,7 +4,6 @@ import com.ceawse.coreprocessor.model.CurrentSaleDocument;
 import com.ceawse.coreprocessor.model.GiftHistoryDocument;
 import com.ceawse.coreprocessor.model.SoldGiftDocument;
 import org.springframework.stereotype.Component;
-
 import java.time.Instant;
 
 @Component
@@ -24,6 +23,12 @@ public class MarketEventMapper {
                 .listedAt(Instant.ofEpochMilli(event.getTimestamp()))
                 .lastSnapshotId(event.getSnapshotId())
                 .updatedAt(Instant.now())
+                .model(event.getModel())
+                .modelRare(event.getModelRare())
+                .backdrop(event.getBackdrop())
+                .backdropRare(event.getBackdropRare())
+                .symbol(event.getSymbol())
+                .symbolRare(event.getSymbolRare())
                 .build();
     }
 
@@ -36,6 +41,10 @@ public class MarketEventMapper {
         sale.setMarketplace(event.getMarketplace());
         sale.setOffchain(Boolean.TRUE.equals(event.getIsOffchain()));
         sale.setUpdatedAt(Instant.now());
+
+        if (event.getModel() != null) sale.setModel(event.getModel());
+        if (event.getBackdrop() != null) sale.setBackdrop(event.getBackdrop());
+        if (event.getSymbol() != null) sale.setSymbol(event.getSymbol());
 
         if (event.getSnapshotId() != null) {
             sale.setLastSnapshotId(event.getSnapshotId());
@@ -56,6 +65,11 @@ public class MarketEventMapper {
                 .soldAt(Instant.ofEpochMilli(event.getTimestamp()))
                 .isOffchain(Boolean.TRUE.equals(event.getIsOffchain()))
                 .marketplace(event.getMarketplace())
+                .model(event.getModel())
+                .modelRare(event.getModelRare())
+                .backdrop(event.getBackdrop())
+                .backdropRare(event.getBackdropRare())
+                .symbol(event.getSymbol())
                 .build();
     }
 

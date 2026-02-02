@@ -13,14 +13,19 @@ import java.time.Instant;
 public class CurrentSaleDocument {
     @Id
     private String id;
+
     @Indexed(unique = true)
     private String address;
+
     @Indexed
     private String collectionAddress;
+
     private String name;
     private String price;
+
     @Indexed
     private Long priceNano;
+
     private String currency;
     private String seller;
     private Instant listedAt;
@@ -32,4 +37,15 @@ public class CurrentSaleDocument {
 
     @Indexed
     private String lastSnapshotId;
+
+    @Indexed
+    private String model;
+    private Integer modelRare;
+
+    @Indexed
+    private String backdrop;
+    private Integer backdropRare;
+
+    private String symbol;
+    private Integer symbolRare;
 }

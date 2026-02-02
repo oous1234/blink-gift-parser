@@ -1,6 +1,5 @@
 package com.ceawse.blinkgift.domain;
 
-import com.ceawse.blinkgift.dto.GetGemsItemDto;
 import lombok.Data;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
@@ -9,7 +8,6 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @Data
 @Document(collection = "gift_history")
 public class GiftHistoryDocument {
-
     @Id
     private String id;
 
@@ -29,38 +27,25 @@ public class GiftHistoryDocument {
 
     @Indexed
     private String marketplace;
-
     private Boolean isOffchain;
 
     private String price;
     private String priceNano;
     private String currency;
+
     private String oldOwner;
     private String newOwner;
+
+    private String model;
+    private Integer modelRare;
+    private String backdrop;
+    private Integer backdropRare;
+    private String symbol;
+    private Integer symbolRare;
+    private Integer giftNum;
+    private Integer giftTotal;
 
     @Indexed
     private String snapshotId;
     private String eventPayload;
-
-    public static GiftHistoryDocument fromDto(GetGemsItemDto dto) {
-        GiftHistoryDocument doc = new GiftHistoryDocument();
-
-        doc.setCollectionAddress(dto.getCollectionAddress());
-        doc.setAddress(dto.getAddress());
-        doc.setHash(dto.getHash());
-        doc.setLt(dto.getLt());
-        doc.setName(dto.getName());
-        doc.setTimestamp(dto.getTimestamp());
-        doc.setIsOffchain(dto.isOffchain());
-
-        if (dto.getTypeData() != null) {
-            doc.setEventType(dto.getTypeData().getType());
-            doc.setPrice(dto.getTypeData().getPrice());
-            doc.setPriceNano(dto.getTypeData().getPriceNano());
-            doc.setCurrency(dto.getTypeData().getCurrency());
-            doc.setOldOwner(dto.getTypeData().getOldOwner());
-            doc.setNewOwner(dto.getTypeData().getNewOwner());
-        }
-        return doc;
-    }
 }

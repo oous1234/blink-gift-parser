@@ -1,21 +1,17 @@
 package com.ceawse.blinkgift.mapper;
 
+import com.ceawse.blinkgift.client.DiscoveryInternalClient;
 import com.ceawse.blinkgift.domain.GiftHistoryDocument;
-import com.ceawse.blinkgift.domain.UniqueGiftDocument;
 import com.ceawse.blinkgift.dto.GetGemsItemDto;
 import com.ceawse.blinkgift.dto.GetGemsSaleItemDto;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
-import java.time.Instant;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Component
 public class EventMapper {
-
     private static final String MARKETPLACE_GETGEMS = "getgems";
-    private static final Pattern GIFT_NAME_PATTERN = Pattern.compile("#(\\d+)(?:\\s+of\\s+|/)(\\d+)");
 
     public GiftHistoryDocument toHistoryEntity(GetGemsItemDto dto) {
         GiftHistoryDocument doc = new GiftHistoryDocument();
@@ -62,46 +58,51 @@ public class EventMapper {
         return doc;
     }
 
-    public UniqueGiftDocument toUniqueGiftEntity(GetGemsSaleItemDto item) {
-        UniqueGiftDocument.GiftAttributes.GiftAttributesBuilder attrsBuilder = UniqueGiftDocument.GiftAttributes.builder();
-        attrsBuilder.updatedAt(Instant.now());
-
-        if (item.getAttributes() != null) {
-            for (var attr : item.getAttributes()) {
-                if ("Model".equalsIgnoreCase(attr.getTraitType())) attrsBuilder.model(attr.getValue());
-                if ("Backdrop".equalsIgnoreCase(attr.getTraitType())) attrsBuilder.backdrop(attr.getValue());
-                if ("Symbol".equalsIgnoreCase(attr.getTraitType())) attrsBuilder.symbol(attr.getValue());
-            }
-        }
-
-        return UniqueGiftDocument.builder()
-                .id(item.getAddress())
-                .name(item.getName())
-                .collectionAddress(item.getCollectionAddress())
-                .isOffchain(item.isOffchain())
-                .attributes(attrsBuilder.build())
-                .lastSeenAt(Instant.now())
-                .build();
+    public void enrichHistory(GiftHistoryDocument doc, DiscoveryInternalClient.MetadataResponse meta) {
+        if (meta == null) return;
+        doc.setModel(meta.getModel());
+        doc.setModelRare(meta.getModelRare());
+        doc.setBackdrop(meta.getBackdrop());
+        doc.setBackdropRare(meta.getBackdropRare());
+        doc.setSymbol(meta.getSymbol());
+        doc.setSymbolRare(meta.getSymbolRare());
+        doc.setGiftNum(meta.getGiftNum());
+        doc.setGiftTotal(meta.getGiftTotal());
     }
 
-    public GiftNumbers parseNumbers(String name) {
-        if (name == null) return new GiftNumbers(null, null);
-        Matcher matcher = GIFT_NAME_PATTERN.matcher(name);
-        if (matcher.find()) {
-            try {
-                return new GiftNumbers(
-                        Integer.parseInt(matcher.group(1)),
-                        Integer.parseInt(matcher.group(2))
-                );
-            } catch (Exception e) {
-                return new GiftNumbers(null, null);
-            }
+    public GiftHistoryDocument createSnapshotFinishEvent(String snapshotId, long startTime, String marketplace) {
+        GiftHistoryDocument doc = new GiftHistoryDocument();
+        doc.setMarketplace(marketplace);
+        doc.setEventType("SNAPSHOT_FINISH");
+        doc.setSnapshotId(snapshotId);
+        doc.setTimestamp(System.currentTimeMillis());
+        doc.setEventPayload(String.valueOf(startTime));
+        doc.setHash("FINISH_" + marketplace.toUpperCase() + "_" + snapshotId);
+        doc.setAddress("SYSTEM");
+        doc.setCollectionAddress("SYSTEM");
+        return doc;
+    }
+
+    public String createSlug(String name) {
+        if (name == null) return null;
+        try {
+            // Из "Winter Wreath #19852" -> "WinterWreath-19852"
+            String cleanName = name.split("#")[0].replaceAll("\\s+", "");
+            String number = name.split("#")[1].split(" ")[0].trim();
+            return cleanName + "-" + number;
+        } catch (Exception e) {
+            return null;
         }
-        return new GiftNumbers(null, null);
     }
 
     private String normalizeEventType(String rawType) {
-        return rawType == null ? "UNKNOWN" : rawType.toLowerCase();
+        if (rawType == null) return "UNKNOWN";
+        return switch (rawType.toLowerCase()) {
+            case "putupforsale", "put_up_for_sale" -> "PUTUPFORSALE";
+            case "sold" -> "SOLD";
+            case "cancelsale", "cancel_sale" -> "CANCELSALE";
+            default -> rawType.toUpperCase();
+        };
     }
 
     private String fromNano(String nano) {
@@ -112,6 +113,4 @@ public class EventMapper {
             return "0";
         }
     }
-
-    public record GiftNumbers(Integer serialNumber, Integer totalLimit) {}
 }

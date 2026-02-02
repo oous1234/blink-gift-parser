@@ -13,7 +13,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
-
 import java.util.List;
 import java.util.UUID;
 
@@ -40,105 +39,52 @@ public class HistoryServiceImpl implements HistoryService {
             long lastTime = stateService.getState(PROCESS_ID).getLastProcessedTimestamp();
             if (lastTime == 0) lastTime = System.currentTimeMillis() - 60_000;
 
-            log.debug("Polling GetGems history. Since timestamp: {}", lastTime);
-
             GetGemsHistoryDto response = apiClient.getHistory(lastTime, null, 50, null, TARGET_TYPES, false);
-
-            if (response == null || !response.isSuccess() || response.getResponse() == null) {
-                log.warn("GetGems API returned unsuccessful response or null");
-                return;
-            }
+            if (response == null || !response.isSuccess() || response.getResponse() == null) return;
 
             var items = response.getResponse().getItems();
-            if (items == null || items.isEmpty()) {
-                log.trace("No new events in GetGems history since {}", lastTime);
-                return;
-            }
+            if (items == null || items.isEmpty()) return;
 
-            log.info("Processing {} new history events", items.size());
+            log.info("Processing {} new GetGems history events", items.size());
 
-            int savedCount = 0;
             for (var item : items) {
                 MDC.put("context", item.getAddress());
                 try {
-                    if (processSingleEvent(item)) {
-                        savedCount++;
-                    }
+                    processSingleEvent(item);
                 } catch (Exception e) {
-                    log.error("Failed to process event hash={}: {}", item.getHash(), e.getMessage(), e);
-                } finally {
-                    MDC.put("context", "REALTIME");
+                    log.error("Failed event {}: {}", item.getHash(), e.getMessage());
                 }
             }
 
             long maxTimestamp = items.stream()
                     .mapToLong(i -> i.getTimestamp() != null ? i.getTimestamp() : 0L)
-                    .max()
-                    .orElse(lastTime);
-
+                    .max().orElse(lastTime);
             stateService.updateState(PROCESS_ID, maxTimestamp, null);
-            log.debug("Poll cycle finished. Saved {}/{} items. New lastTimestamp: {}", savedCount, items.size(), maxTimestamp);
 
         } catch (Exception e) {
-            log.error("Critical error in history service cycle: {}", e.getMessage(), e);
+            log.error("History loop error: {}", e.getMessage());
         } finally {
             MDC.clear();
         }
     }
 
-    private boolean processSingleEvent(GetGemsItemDto item) {
-        if (repository.existsByHash(item.getHash())) {
-            log.trace("Event already exists in DB: {}", item.getHash());
-            return false;
-        }
+    private void processSingleEvent(GetGemsItemDto item) {
+        if (repository.existsByHash(item.getHash())) return;
 
-        repository.save(mapper.toHistoryEntity(item));
-        log.debug("Saved new event: [Type: {}] [Hash: {}]",
-                (item.getTypeData() != null ? item.getTypeData().getType() : "UNKNOWN"),
-                item.getHash());
+        GiftHistoryDocument doc = mapper.toHistoryEntity(item);
 
-        if (item.getTypeData() != null && "putUpForSale".equals(item.getTypeData().getType())) {
-            log.info("New listing detected: {} ({} TON)", item.getName(), item.getTypeData().getPrice());
-            processNewListing(item);
-        }
-        return true;
-    }
-
-    private void processNewListing(GetGemsItemDto historyItem) {
         try {
-            var detailResponse = apiClient.getNftDetails(historyItem.getAddress());
-            if (detailResponse == null || !detailResponse.isSuccess() || detailResponse.getResponse() == null) {
-                log.warn("Could not fetch NFT details for enrichment: {}", historyItem.getAddress());
-                return;
+            String slug = mapper.createSlug(item.getName());
+            if (slug != null) {
+                var meta = discoveryClient.getMetadata(slug);
+                mapper.enrichHistory(doc, meta);
+                log.debug("Event enriched: {} model={}", slug, doc.getModel());
             }
-
-            var details = detailResponse.getResponse();
-            var numbers = mapper.parseNumbers(details.getName());
-
-            // Собираем атрибуты для лога
-            String model = null, backdrop = null;
-            if (details.getAttributes() != null) {
-                for (var attr : details.getAttributes()) {
-                    if ("Model".equalsIgnoreCase(attr.getTraitType())) model = attr.getValue();
-                    if ("Backdrop".equalsIgnoreCase(attr.getTraitType())) backdrop = attr.getValue();
-                }
-            }
-
-            log.debug("Sending enrichment request. Model: {}, Backdrop: {}", model, backdrop);
-
-            discoveryClient.enrich(DiscoveryInternalClient.EnrichmentRequest.builder()
-                    .id(details.getAddress())
-                    .giftName(details.getName())
-                    .collectionAddress(details.getCollectionAddress())
-                    .serialNumber(numbers.serialNumber())
-                    .totalLimit(numbers.totalLimit())
-                    .model(model)
-                    .backdrop(backdrop)
-                    .timestamp(historyItem.getTimestamp())
-                    .build());
-
         } catch (Exception e) {
-            log.error("Real-time enrichment failed for {}: {}", historyItem.getAddress(), e.getMessage());
+            log.warn("Could not enrich event {}: Discovery error", item.getName());
         }
+
+        repository.save(doc);
+        log.info("Saved enriched event: {} [{}]", doc.getName(), doc.getEventType());
     }
 }

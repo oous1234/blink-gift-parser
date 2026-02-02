@@ -13,7 +13,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-
 import java.util.List;
 import java.util.UUID;
 
@@ -32,35 +31,20 @@ public class SnapshotServiceImpl implements SnapshotService {
     public void runSnapshot(String marketplace) {
         String snapshotId = UUID.randomUUID().toString().substring(0, 8);
         MDC.put("traceId", "SNAP-" + snapshotId);
-        MDC.put("context", "STARTUP");
-
         long startTime = System.currentTimeMillis();
-        log.info(">>> STARTING SNAPSHOT PROCESS. Marketplace: {}", marketplace);
 
         try {
             List<IndexerApiClient.CollectionDto> collections = indexerClient.getCollections();
-            if (collections == null || collections.isEmpty()) {
-                log.error("Snapshot aborted: No collections received from indexer");
-                return;
-            }
+            if (collections == null) return;
 
-            log.info("Found {} collections to process", collections.size());
-
-            for (int i = 0; i < collections.size(); i++) {
-                var col = collections.get(i);
+            for (var col : collections) {
                 MDC.put("context", col.address);
-                log.info("[{}/{}] Processing collection: {}", (i + 1), collections.size(), col.address);
-
-                try {
-                    processCollection(col.address, snapshotId);
-                } catch (Exception e) {
-                    log.error("Error processing collection {}: {}", col.address, e.getMessage(), e);
-                }
+                processCollection(col.address, snapshotId);
             }
 
             finishSnapshot(snapshotId, startTime, marketplace);
         } catch (Exception e) {
-            log.error("CRITICAL ERROR during snapshot execution: {}", e.getMessage(), e);
+            log.error("Snapshot CRITICAL error: {}", e.getMessage());
         } finally {
             MDC.clear();
         }
@@ -69,91 +53,48 @@ public class SnapshotServiceImpl implements SnapshotService {
     private void processCollection(String collectionAddress, String snapshotId) {
         String cursor = null;
         boolean hasMore = true;
-        int totalProcessed = 0;
 
         while (hasMore) {
             try {
                 var response = getGemsClient.getOnSale(collectionAddress, 100, cursor);
-                if (response == null || !response.isSuccess() || response.getResponse() == null) {
-                    log.warn("Unsuccessful response for collection {} at cursor {}", collectionAddress, cursor);
-                    break;
-                }
+                if (response == null || response.getResponse() == null) break;
 
                 List<GetGemsSaleItemDto> items = response.getResponse().getItems();
-                if (items == null || items.isEmpty()) {
-                    hasMore = false;
-                    continue;
+                if (items == null || items.isEmpty()) break;
+
+                for (var item : items) {
+                    if (item.getSale() == null) continue;
+
+                    GiftHistoryDocument doc = eventMapper.toSnapshotEntity(item, snapshotId);
+
+                    // Обогащаем каждый лот снапшота
+                    try {
+                        String slug = eventMapper.createSlug(item.getName());
+                        if (slug != null) {
+                            var meta = discoveryClient.getMetadata(slug);
+                            eventMapper.enrichHistory(doc, meta);
+                        }
+                    } catch (Exception e) {
+                        // Если Discovery не отвечает, сохраняем как есть (с пустыми атрибутами)
+                    }
+
+                    historyRepository.save(doc);
                 }
-
-                List<GiftHistoryDocument> historyDocs = items.stream()
-                        .filter(i -> i.getSale() != null)
-                        .map(i -> eventMapper.toSnapshotEntity(i, snapshotId))
-                        .toList();
-
-                if (!historyDocs.isEmpty()) {
-                    historyRepository.saveAll(historyDocs);
-                }
-
-                items.forEach(this::sendToDiscovery);
-
-                totalProcessed += items.size();
-                log.debug("Batch processed: {} items. Total collection items: {}", items.size(), totalProcessed);
 
                 cursor = response.getResponse().getCursor();
-                if (cursor == null) {
-                    hasMore = false;
-                } else {
-                    // Маленькая пауза, чтобы не забанили прокси
-                    Thread.sleep(500);
-                }
+                if (cursor == null) hasMore = false;
+                else Thread.sleep(300);
+
             } catch (Exception e) {
-                log.error("Exception during paginated processing for {}: {}", collectionAddress, e.getMessage());
+                log.error("Collection process error: {}", e.getMessage());
                 hasMore = false;
             }
-        }
-        log.info("Collection {} finished. Total items found: {}", collectionAddress, totalProcessed);
-    }
-
-    private void sendToDiscovery(GetGemsSaleItemDto item) {
-        try {
-            var numbers = eventMapper.parseNumbers(item.getName());
-            String model = null, backdrop = null;
-            if (item.getAttributes() != null) {
-                for (var attr : item.getAttributes()) {
-                    if ("Model".equalsIgnoreCase(attr.getTraitType())) model = attr.getValue();
-                    if ("Backdrop".equalsIgnoreCase(attr.getTraitType())) backdrop = attr.getValue();
-                }
-            }
-            discoveryClient.enrich(DiscoveryInternalClient.EnrichmentRequest.builder()
-                    .id(item.getAddress())
-                    .giftName(item.getName())
-                    .collectionAddress(item.getCollectionAddress())
-                    .serialNumber(numbers.serialNumber())
-                    .totalLimit(numbers.totalLimit())
-                    .model(model)
-                    .backdrop(backdrop)
-                    .timestamp(System.currentTimeMillis())
-                    .build());
-        } catch (Exception e) {
-            log.trace("Failed to send item to discovery: {} (Normal if discovery is down)", item.getName());
         }
     }
 
     private void finishSnapshot(String snapshotId, long startTime, String marketplace) {
-        MDC.put("context", "FINALIZING");
-        long duration = (System.currentTimeMillis() - startTime) / 1000;
-
-        GiftHistoryDocument doc = new GiftHistoryDocument();
-        doc.setMarketplace(marketplace);
-        doc.setEventType("SNAPSHOT_FINISH");
-        doc.setSnapshotId(snapshotId);
-        doc.setTimestamp(System.currentTimeMillis());
-        doc.setEventPayload(String.valueOf(startTime));
-        doc.setHash("FINISH_" + snapshotId);
-        doc.setAddress("SYSTEM");
-        doc.setCollectionAddress("SYSTEM");
-
+        GiftHistoryDocument doc = eventMapper.createSnapshotFinishEvent(snapshotId, startTime, marketplace);
         historyRepository.save(doc);
-        log.info(">>> SNAPSHOT COMPLETED. ID: {}. Total duration: {}s", snapshotId, duration);
+        log.info("Snapshot {} finished for {}", snapshotId, marketplace);
     }
 }

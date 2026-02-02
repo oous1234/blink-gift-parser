@@ -24,6 +24,7 @@ public class PortalsGiftHistoryDocument {
     private Long timestamp;
     private String eventType;
     private Boolean isOffchain;
+
     private String price;
     private String priceNano;
     private String currency;
@@ -31,9 +32,17 @@ public class PortalsGiftHistoryDocument {
     private String oldOwner;
     private String newOwner;
 
+    private String model;
+    private Integer modelRare;
+    private String backdrop;
+    private Integer backdropRare;
+    private String symbol;
+    private Integer symbolRare;
+    private Integer giftNum;
+    private Integer giftTotal;
+
     @Indexed
     private String snapshotId;
-
     private String eventPayload;
 
     @Indexed

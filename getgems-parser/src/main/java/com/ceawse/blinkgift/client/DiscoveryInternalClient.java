@@ -1,7 +1,10 @@
 package com.ceawse.blinkgift.client;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.*;
 import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 
@@ -10,6 +13,9 @@ public interface DiscoveryInternalClient {
 
     @PostMapping("/internal/v1/enrichment/calculate")
     void enrich(@RequestBody EnrichmentRequest request);
+
+    @GetMapping("/internal/v1/gifts/metadata/{slug}")
+    MetadataResponse getMetadata(@PathVariable("slug") String slug);
 
     @Data
     @Builder
@@ -23,8 +29,23 @@ public interface DiscoveryInternalClient {
         private String model;
         private String backdrop;
         private String symbol;
-
         private Integer serialNumber;
         private Integer totalLimit;
+    }
+
+    @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class MetadataResponse {
+        private String id;
+        private String name;
+        private Integer giftNum;
+        private Integer giftMinted;
+        private Integer giftTotal;
+        private String model;
+        private Integer modelRare;
+        private String backdrop;
+        private Integer backdropRare;
+        private String symbol;
+        private Integer symbolRare;
     }
 }

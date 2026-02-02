@@ -1,9 +1,7 @@
 package com.ceawse.coreprocessor.service.impl;
 
 import com.ceawse.coreprocessor.client.CoreInternalClient;
-import com.ceawse.coreprocessor.model.CurrentSaleDocument;
-import com.ceawse.coreprocessor.model.GiftHistoryDocument;
-import com.ceawse.coreprocessor.model.MarketEventType;
+import com.ceawse.coreprocessor.model.*;
 import com.ceawse.coreprocessor.repository.CurrentSaleRepository;
 import com.ceawse.coreprocessor.repository.SoldGiftRepository;
 import com.ceawse.coreprocessor.repository.redis.MarketDataRedisRepository;
@@ -53,23 +51,39 @@ public class MarketProcessorImpl implements MarketProcessor {
     }
 
     private void handleListing(GiftHistoryDocument event) {
-        BigDecimal price = new BigDecimal(event.getPrice());
-        BigDecimal floor = marketDataRedis.getCollectionFloor(event.getCollectionAddress());
+        BigDecimal price = new BigDecimal(event.getPrice() != null ? event.getPrice() : "0");
+        String colAddr = event.getCollectionAddress();
 
-        double dealScore = calculateDealScore(price, floor);
-        log.debug("Price Analysis: Item={}, Price={}, Floor={}, Score={}",
-                event.getName(), price, floor, dealScore);
+        // 1. Обновляем флор модели в Redis, если атрибут есть
+        if (event.getModel() != null) {
+            BigDecimal currentModelFloor = marketDataRedis.getModelFloor(colAddr, event.getModel());
+            if (currentModelFloor == null || currentModelFloor.compareTo(BigDecimal.ZERO) == 0 || price.compareTo(currentModelFloor) < 0) {
+                marketDataRedis.saveModelFloor(colAddr, event.getModel(), price);
+            }
+        }
 
+        // 2. Определяем опорную цену (флор модели или флор коллекции)
+        BigDecimal baseFloor = null;
+        if (event.getModel() != null) {
+            baseFloor = marketDataRedis.getModelFloor(colAddr, event.getModel());
+        }
+        if (baseFloor == null || baseFloor.compareTo(BigDecimal.ZERO) == 0) {
+            baseFloor = marketDataRedis.getCollectionFloor(colAddr);
+        }
+
+        double dealScore = calculateDealScore(price, baseFloor);
+
+        // 3. Обновляем БД текущих продаж
         CurrentSaleDocument sale = currentSaleRepository.findByAddress(event.getAddress())
                 .orElseGet(() -> mapper.toCurrentSale(event));
-
         mapper.updateCurrentSale(sale, event);
         currentSaleRepository.save(sale);
 
+        // 4. Логирование и уведомление фронтенда
         if (dealScore > 0) {
-            log.info("🔥 GOOD DEAL: {} for {} TON (Floor: {}, Score: {}%)",
-                    event.getName(), price, floor, Math.round(dealScore));
-            notifyFrontend(event, price, floor, dealScore);
+            log.info("🔥 DEAL: {} (Model: {}) for {} TON (Floor: {}, Score: {}%)",
+                    event.getName(), event.getModel(), price, baseFloor, Math.round(dealScore));
+            notifyFrontend(event, price, baseFloor, dealScore);
         } else {
             log.info("New Listing: {} for {} TON", event.getName(), price);
         }
@@ -86,14 +100,14 @@ public class MarketProcessorImpl implements MarketProcessor {
             Map<String, Object> deal = new HashMap<>();
             deal.put("id", event.getHash());
             deal.put("name", event.getName());
+            deal.put("model", event.getModel());
             deal.put("price", price);
-            deal.put("floor", floor != null ? floor : price);
+            deal.put("floor", floor);
             deal.put("dealScore", Math.round(dealScore));
             deal.put("marketplace", event.getMarketplace());
             deal.put("timestamp", System.currentTimeMillis());
 
             coreInternalClient.sendDealToFront(deal);
-            log.debug("Notification sent to frontend for deal: {}", event.getHash());
         } catch (Exception e) {
             log.error("Failed to notify core-backend about listing: {}", e.getMessage());
         }
@@ -102,7 +116,6 @@ public class MarketProcessorImpl implements MarketProcessor {
     private double calculateDealScore(BigDecimal price, BigDecimal floor) {
         if (floor == null || floor.compareTo(BigDecimal.ZERO) <= 0) return 0.0;
         if (price.compareTo(floor) >= 0) return 0.0;
-
         return floor.subtract(price)
                 .divide(floor, 4, RoundingMode.HALF_UP)
                 .multiply(BigDecimal.valueOf(100))
@@ -112,7 +125,6 @@ public class MarketProcessorImpl implements MarketProcessor {
     private void handleSnapshotFinish(GiftHistoryDocument event) {
         String snapshotId = event.getSnapshotId();
         log.info("Finalizing snapshot: {}", snapshotId);
-
         long startTime = Long.parseLong(event.getEventPayload());
         Instant threshold = Instant.ofEpochMilli(startTime);
 
