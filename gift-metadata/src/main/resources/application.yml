@@ -20,7 +20,7 @@ spring:
         enabled: false
 
 server:
-  port: 7781
+  port: 7785
   error:
     include-stacktrace: newer
 
