@@ -10,6 +10,7 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
@@ -26,8 +27,10 @@ public class GiftMetadataServiceImpl implements GiftMetadataService {
 
     private static final Pattern RARE_EXTRACTOR = Pattern.compile("(\\d+(\\.\\d+)?)%");
     private static final Pattern QUANTITY_EXTRACTOR = Pattern.compile("(\\d[\\d\\s]*)/(\\d[\\d\\s]*)");
+    private static final Pattern CLEAN_NAME_PATTERN = Pattern.compile("^(.*?)\\s*\\d+(\\.\\d+)?%$");
 
     @Override
+    @Cacheable(value = "gift_metadata", key = "#slug + '-' + #id")
     public NftMetadataResponse getMetadata(String slug, Integer id) {
         String html;
         try {
@@ -46,15 +49,13 @@ public class GiftMetadataServiceImpl implements GiftMetadataService {
     }
 
     private NftMetadataResponse parseDocument(Document doc, String slug, Integer id) {
-        // 1. Имя и Слюг
-        String fullName = "";
+        String giftName = "Unknown Gift";
         Element metaTitle = doc.selectFirst("meta[property=og:title]");
         if (metaTitle != null) {
-            fullName = metaTitle.attr("content").split("–")[0].trim();
+            String title = metaTitle.attr("content");
+            giftName = title.split("–")[0].split("#")[0].trim();
         }
-        String giftName = fullName.contains("#") ? fullName.split("#")[0].trim() : fullName;
 
-        // 2. Парсинг таблицы атрибутов (Model, Backdrop, Symbol, Quantity)
         Map<String, String> attrs = new HashMap<>();
         Elements rows = doc.select("table.tgme_gift_table tr");
         for (Element row : rows) {
@@ -65,20 +66,19 @@ public class GiftMetadataServiceImpl implements GiftMetadataService {
             }
         }
 
-        // 3. Извлечение редкости (число без %)
-        Integer modelRare = extractRare(attrs.get("model"));
-        Integer backdropRare = extractRare(attrs.get("backdrop"));
-        Integer patternRare = extractRare(attrs.get("symbol")); // В Telegram Symbol часто выступает как Pattern
+        String rawModel = attrs.get("model");
+        String rawBackdrop = attrs.get("backdrop");
+        String rawPattern = attrs.get("symbol");
 
-        // 4. Парсинг тиража (Minted / Total)
-        String quantityStr = attrs.getOrDefault("quantity", "");
-        int[] quantity = parseQuantity(quantityStr);
+        String cleanModel = cleanTraitName(rawModel);
+        String cleanBackdrop = cleanTraitName(rawBackdrop);
+        String cleanPattern = cleanTraitName(rawPattern);
 
-        // 5. Работа с цветами (Конвертация HEX в Decimal)
+        int[] qty = parseQuantity(attrs.getOrDefault("quantity", "0/0"));
+
         Integer colorCenter = null;
         Integer colorEdge = null;
         Integer colorPattern = null;
-
         Element svg = doc.selectFirst("div.tgme_gift_preview > svg");
         if (svg != null) {
             Elements stops = svg.select("stop");
@@ -86,45 +86,47 @@ public class GiftMetadataServiceImpl implements GiftMetadataService {
                 colorCenter = hexToDecimal(stops.get(0).attr("stop-color"));
                 colorEdge = hexToDecimal(stops.get(1).attr("stop-color"));
             }
-            // Поиск цвета паттерна
             Element floodTag = svg.selectFirst("[id~=gift.*PatternColor]");
             if (floodTag != null) {
                 colorPattern = hexToDecimal(floodTag.attr("flood-color"));
             }
         }
 
-        // 6. Ссылки на ресурсы (Анимация и Паттерн)
-        Element tgsSource = doc.selectFirst("source[type=application/x-tgsticker]");
-        String modelUrl = (tgsSource != null) ? tgsSource.attr("srcset") : null;
+        String modelUrl = String.format("https://api.changes.tg/model/%s/%s.json",
+                slug, cleanModel.replace(" ", "%20"));
 
-        String patternUrl = null;
-        if (svg != null) {
-            Element imageTag = svg.selectFirst("image");
-            if (imageTag != null) {
-                patternUrl = imageTag.hasAttr("xlink:href") ? imageTag.attr("xlink:href") : imageTag.attr("href");
-            }
-        }
+        String patternUrl = cleanPattern != null ?
+                String.format("https://api.changes.tg/symbol/%s/%s.png", slug, cleanPattern.replace(" ", "%20")) : null;
 
         return NftMetadataResponse.builder()
                 .giftSlug(slug + "-" + id)
                 .giftName(giftName)
                 .giftNum(id)
-                .giftMinted(quantity[0])
-                .giftTotal(quantity[1])
-                .model(cleanName(attrs.get("model")))
-                .modelRare(modelRare)
-                .backdrop(cleanName(attrs.get("backdrop")))
-                .backdropRare(backdropRare)
-                .pattern(cleanName(attrs.get("symbol")))
-                .patternRare(patternRare)
+                .giftMinted(qty[0])
+                .giftTotal(qty[1])
+                .model(cleanModel)
+                .modelRare(extractRareMultiplied(rawModel))
+                .backdrop(cleanBackdrop)
+                .backdropRare(extractRareMultiplied(rawBackdrop))
+                .pattern(cleanPattern)
+                .patternRare(extractRareMultiplied(rawPattern))
                 .backdropCenterColor(colorCenter)
                 .backdropEdgeColor(colorEdge)
                 .backdropPatternColor(colorPattern)
-                .modelUrl(normalizeUrl(modelUrl))
-                .patternUrl(normalizeUrl(patternUrl))
+                .modelUrl(modelUrl)
+                .patternUrl(patternUrl)
                 .pageUrl("https://t.me/nft/" + slug + "-" + id)
                 .owner(attrs.getOrDefault("owner", "Unknown"))
                 .build();
+    }
+
+    private String cleanTraitName(String raw) {
+        if (raw == null) return "Original";
+        Matcher m = CLEAN_NAME_PATTERN.matcher(raw);
+        if (m.find()) {
+            return m.group(1).trim();
+        }
+        return raw.trim();
     }
 
     private Integer hexToDecimal(String hex) {
@@ -136,36 +138,29 @@ public class GiftMetadataServiceImpl implements GiftMetadataService {
         }
     }
 
-    private Integer extractRare(String text) {
+    private Integer extractRareMultiplied(String text) {
         if (text == null) return null;
         Matcher m = RARE_EXTRACTOR.matcher(text);
         if (m.find()) {
-            // Превращаем "1.5%" в 1 (целое число) или можно оставить Double,
-            // но вы просили целое для бекенда
-            return (int) Double.parseDouble(m.group(1));
+            try {
+                double val = Double.parseDouble(m.group(1));
+                return (int) Math.round(val * 10);
+            } catch (NumberFormatException e) {
+                return null;
+            }
         }
         return null;
-    }
-
-    private String cleanName(String text) {
-        if (text == null) return null;
-        return text.split("\\d+(\\.\\d+)?%")[0].trim();
     }
 
     private int[] parseQuantity(String text) {
         Matcher m = QUANTITY_EXTRACTOR.matcher(text);
         if (m.find()) {
-            int minted = Integer.parseInt(m.group(1).replaceAll("\\s", ""));
-            int total = Integer.parseInt(m.group(2).replaceAll("\\s", ""));
-            return new int[]{minted, total};
+            try {
+                int minted = Integer.parseInt(m.group(1).replaceAll("\\s", ""));
+                int total = Integer.parseInt(m.group(2).replaceAll("\\s", ""));
+                return new int[]{minted, total};
+            } catch (Exception e) { return new int[]{0, 0}; }
         }
         return new int[]{0, 0};
-    }
-
-    private String normalizeUrl(String url) {
-        if (url == null || url.isEmpty()) return null;
-        if (url.startsWith("//")) return "https:" + url;
-        if (url.startsWith("/file/")) return "https://cdn4.cdn-telegram.org" + url;
-        return url;
     }
 }
