@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: gift-discovery
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017/test
+    redis:
+      host: localhost
+      port: 6379
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 2
+  cloud:
+    openfeign:
+      okhttp:
+        enabled: true
+      httpclient:
+        enabled: false
+
+server:
+  port: 7781
+  error:
+    include-stacktrace: newer
+
+feign:
+  client:
+    config:
+      default:
+        connectTimeout: 5000
+        readTimeout: 10000
+        loggerLevel: basic

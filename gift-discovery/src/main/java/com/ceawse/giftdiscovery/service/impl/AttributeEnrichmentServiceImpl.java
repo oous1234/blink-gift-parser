@@ -1,8 +1,6 @@
 package com.ceawse.giftdiscovery.service.impl;
 
-import com.ceawse.giftdiscovery.client.GiftAttributesFeignClient;
 import com.ceawse.giftdiscovery.client.TelegramNftFeignClient;
-import com.ceawse.giftdiscovery.dto.GiftAttributesDto;
 import com.ceawse.giftdiscovery.model.UniqueGiftDocument;
 import com.ceawse.giftdiscovery.service.AttributeEnrichmentService;
 import lombok.extern.slf4j.Slf4j;
@@ -27,24 +25,26 @@ import java.util.regex.Pattern;
 @Slf4j
 @Service
 public class AttributeEnrichmentServiceImpl implements AttributeEnrichmentService {
+
     private final MongoTemplate mongoTemplate;
-    private final GiftAttributesFeignClient fragmentApiClient;
     private final TelegramNftFeignClient telegramApiClient;
     private final ExecutorService executor;
 
     private static final int BATCH_SIZE = 500;
+
+    // Регулярные выражения для парсинга HTML страницы Telegram
     private static final Pattern OG_DESC_PATTERN = Pattern.compile("<meta property=\"og:description\" content=\"([\\s\\S]*?)\">");
+
+    // Эти паттерны ищут строки вида "Model: Название", "Backdrop: Название" и т.д. в описании
     private static final Pattern ATTR_MODEL_PATTERN = Pattern.compile("Model:\\s*(.*?)(?:\\n|$)");
     private static final Pattern ATTR_BACKDROP_PATTERN = Pattern.compile("Backdrop:\\s*(.*?)(?:\\n|$)");
     private static final Pattern ATTR_SYMBOL_PATTERN = Pattern.compile("Symbol:\\s*(.*?)(?:\\n|$)");
 
     public AttributeEnrichmentServiceImpl(
             MongoTemplate mongoTemplate,
-            GiftAttributesFeignClient fragmentApiClient,
             TelegramNftFeignClient telegramApiClient,
             @Qualifier("virtualThreadExecutor") ExecutorService executor) {
         this.mongoTemplate = mongoTemplate;
-        this.fragmentApiClient = fragmentApiClient;
         this.telegramApiClient = telegramApiClient;
         this.executor = executor;
     }
@@ -56,6 +56,7 @@ public class AttributeEnrichmentServiceImpl implements AttributeEnrichmentServic
         MDC.put("context", "BATCH-JOB");
 
         try {
+            // Ищем подарки, у которых еще нет заполненных атрибутов
             Query query = new Query(Criteria.where("attributes").exists(false)).limit(BATCH_SIZE);
             List<UniqueGiftDocument> gifts = mongoTemplate.find(query, UniqueGiftDocument.class);
 
@@ -64,12 +65,12 @@ public class AttributeEnrichmentServiceImpl implements AttributeEnrichmentServic
                 return;
             }
 
-            log.info("Starting batch attribute enrichment for {} gifts", gifts.size());
+            log.info("Starting batch Telegram parsing for {} gifts", gifts.size());
 
             ConcurrentLinkedQueue<UniqueGiftDocument> processedGifts = new ConcurrentLinkedQueue<>();
+
             var futures = gifts.stream()
                     .map(gift -> CompletableFuture.runAsync(() -> {
-                        // Внутри Virtual Thread нужно снова ставить MDC
                         MDC.put("traceId", "ATTR-" + traceId);
                         MDC.put("context", gift.getId());
                         try {
@@ -82,7 +83,7 @@ public class AttributeEnrichmentServiceImpl implements AttributeEnrichmentServic
 
             CompletableFuture.allOf(futures).join();
 
-            log.info("Finished gathering attributes. Saving {} updates...", processedGifts.size());
+            log.info("Finished Telegram parsing. Saving {} updates to DB...", processedGifts.size());
             saveUpdates(processedGifts);
 
         } catch (Exception e) {
@@ -94,27 +95,23 @@ public class AttributeEnrichmentServiceImpl implements AttributeEnrichmentServic
 
     private void processSingleGift(UniqueGiftDocument gift, ConcurrentLinkedQueue<UniqueGiftDocument> resultQueue) {
         try {
+            // Формируем слаг (например, "CloverPin-182305")
             String slug = formatSlug(gift.getName());
-            log.debug("Fetching metadata for: {} (Slug: {})", gift.getName(), slug);
+            log.debug("Fetching Telegram page for: {} (Slug: {})", gift.getName(), slug);
 
-            UniqueGiftDocument.GiftAttributes attributes;
-            if (gift.isOffchainSafe()) {
-                String html = telegramApiClient.getNftPage(slug);
-                attributes = parseAttributesFromHtml(html);
-            } else {
-                GiftAttributesDto dto = fragmentApiClient.getAttributes(slug);
-                attributes = mapFragmentDtoToModel(dto);
-            }
+            // Теперь мы ВСЕГДА идем только в Telegram
+            String html = telegramApiClient.getNftPage(slug);
+            UniqueGiftDocument.GiftAttributes attributes = parseAttributesFromHtml(html);
 
             if (attributes != null) {
                 gift.setAttributes(attributes);
                 resultQueue.add(gift);
-                log.debug("Successfully parsed attributes for {}", gift.getName());
+                log.debug("Successfully parsed Telegram attributes for {}", gift.getName());
             } else {
-                log.warn("Attributes not found for gift: {} (Slug: {})", gift.getName(), slug);
+                log.warn("Attributes not found in Telegram metadata for gift: {} (Slug: {})", gift.getName(), slug);
             }
         } catch (Exception e) {
-            log.error("Error processing gift {}: {}", gift.getName(), e.getMessage());
+            log.error("Error parsing Telegram page for {}: {}", gift.getName(), e.getMessage());
         }
     }
 
@@ -135,43 +132,48 @@ public class AttributeEnrichmentServiceImpl implements AttributeEnrichmentServic
         }
     }
 
+    /**
+     * Превращает "Clover Pin #182305" в "CloverPin-182305"
+     */
     private String formatSlug(String name) {
         if (name == null) return "";
         int hashIndex = name.lastIndexOf('#');
         if (hashIndex != -1) {
-            String base = name.substring(0, hashIndex).replace(" ", "").replace("'", "").replace("’", "").replace("-", "").trim();
+            String base = name.substring(0, hashIndex)
+                    .replace(" ", "")
+                    .replace("'", "")
+                    .replace("’", "")
+                    .replace("-", "")
+                    .trim();
             String num = name.substring(hashIndex + 1).trim();
             return base + "-" + num;
         }
         return name.replaceAll("[\\s'’-]", "");
     }
 
-    private UniqueGiftDocument.GiftAttributes mapFragmentDtoToModel(GiftAttributesDto dto) {
-        if (dto == null || dto.getAttributes() == null || dto.getAttributes().isEmpty()) return null;
-        var attrs = dto.getAttributes();
-        return UniqueGiftDocument.GiftAttributes.builder()
-                .model(getAttributeValue(attrs, 0))
-                .backdrop(getAttributeValue(attrs, 1))
-                .symbol(getAttributeValue(attrs, 2))
-                .updatedAt(Instant.now())
-                .build();
-    }
-
-    private String getAttributeValue(List<GiftAttributesDto.AttributeDto> list, int index) {
-        return (list.size() > index) ? list.get(index).getValue() : null;
-    }
-
+    /**
+     * Извлекает атрибуты из мета-тега og:description HTML-страницы Telegram.
+     * Парсятся: Model, Backdrop, Symbol.
+     */
     private UniqueGiftDocument.GiftAttributes parseAttributesFromHtml(String html) {
+        if (html == null) return null;
+
         Matcher descMatcher = OG_DESC_PATTERN.matcher(html);
         if (descMatcher.find()) {
-            String content = descMatcher.group(1);
+            String content = descMatcher.group(1); // Текст внутри content="..."
+
             String model = extractRegex(content, ATTR_MODEL_PATTERN);
             String backdrop = extractRegex(content, ATTR_BACKDROP_PATTERN);
             String symbol = extractRegex(content, ATTR_SYMBOL_PATTERN);
+
+            // Если хоть один атрибут найден, создаем объект
             if (model != null || backdrop != null || symbol != null) {
                 return UniqueGiftDocument.GiftAttributes.builder()
-                        .model(model).backdrop(backdrop).symbol(symbol)
-                        .updatedAt(Instant.now()).build();
+                        .model(model)
+                        .backdrop(backdrop)
+                        .symbol(symbol)
+                        .updatedAt(Instant.now())
+                        .build();
             }
         }
         return null;
