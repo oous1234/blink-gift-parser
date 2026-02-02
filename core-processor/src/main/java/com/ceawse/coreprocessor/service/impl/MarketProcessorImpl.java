@@ -32,33 +32,56 @@ public class MarketProcessorImpl implements MarketProcessor {
     private final MarketDataRedisRepository marketDataRedis;
     private final MongoTemplate mongoTemplate;
     private final MarketEventMapper mapper;
-    private final CoreInternalClient coreInternalClient; // Добавляем клиент
+    private final CoreInternalClient coreInternalClient;
 
     @Override
     @Transactional
     public void processEvent(GiftHistoryDocument event) {
         MarketEventType type = MarketEventType.fromString(event.getEventType());
+        log.debug("Processing event: {} for item: {}", type, event.getName());
+
         switch (type) {
             case PUTUPFORSALE, SNAPSHOT_LIST -> handleListing(event);
-            case CANCELSALE -> currentSaleRepository.deleteByAddress(event.getAddress());
+            case CANCELSALE -> {
+                currentSaleRepository.deleteByAddress(event.getAddress());
+                log.info("Sale cancelled for item: {}", event.getName());
+            }
             case SOLD -> handleSold(event);
             case SNAPSHOT_FINISH -> handleSnapshotFinish(event);
-            default -> log.debug("Event {} skipped", type);
+            default -> log.warn("Unknown event type {} for item {}", type, event.getName());
         }
     }
 
     private void handleListing(GiftHistoryDocument event) {
         BigDecimal price = new BigDecimal(event.getPrice());
         BigDecimal floor = marketDataRedis.getCollectionFloor(event.getCollectionAddress());
+
         double dealScore = calculateDealScore(price, floor);
+        log.debug("Price Analysis: Item={}, Price={}, Floor={}, Score={}",
+                event.getName(), price, floor, dealScore);
 
         CurrentSaleDocument sale = currentSaleRepository.findByAddress(event.getAddress())
                 .orElseGet(() -> mapper.toCurrentSale(event));
+
         mapper.updateCurrentSale(sale, event);
         currentSaleRepository.save(sale);
 
-        log.info("📢 New Listing: {} for {} TON (Score: {})", event.getName(), price, Math.round(dealScore));
+        if (dealScore > 0) {
+            log.info("🔥 GOOD DEAL: {} for {} TON (Floor: {}, Score: {}%)",
+                    event.getName(), price, floor, Math.round(dealScore));
+            notifyFrontend(event, price, floor, dealScore);
+        } else {
+            log.info("New Listing: {} for {} TON", event.getName(), price);
+        }
+    }
 
+    private void handleSold(GiftHistoryDocument event) {
+        currentSaleRepository.deleteByAddress(event.getAddress());
+        soldGiftRepository.save(mapper.toSoldGift(event));
+        log.info("💰 ITEM SOLD: {} for {} TON", event.getName(), event.getPrice());
+    }
+
+    private void notifyFrontend(GiftHistoryDocument event, BigDecimal price, BigDecimal floor, double dealScore) {
         try {
             Map<String, Object> deal = new HashMap<>();
             deal.put("id", event.getHash());
@@ -70,15 +93,10 @@ public class MarketProcessorImpl implements MarketProcessor {
             deal.put("timestamp", System.currentTimeMillis());
 
             coreInternalClient.sendDealToFront(deal);
+            log.debug("Notification sent to frontend for deal: {}", event.getHash());
         } catch (Exception e) {
             log.error("Failed to notify core-backend about listing: {}", e.getMessage());
         }
-    }
-
-    private void handleSold(GiftHistoryDocument event) {
-        currentSaleRepository.deleteByAddress(event.getAddress());
-        soldGiftRepository.save(mapper.toSoldGift(event));
-        log.debug("Item sold and moved to history: {}", event.getName());
     }
 
     private double calculateDealScore(BigDecimal price, BigDecimal floor) {
@@ -93,6 +111,8 @@ public class MarketProcessorImpl implements MarketProcessor {
 
     private void handleSnapshotFinish(GiftHistoryDocument event) {
         String snapshotId = event.getSnapshotId();
+        log.info("Finalizing snapshot: {}", snapshotId);
+
         long startTime = Long.parseLong(event.getEventPayload());
         Instant threshold = Instant.ofEpochMilli(startTime);
 

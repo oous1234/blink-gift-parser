@@ -6,6 +6,7 @@ import com.ceawse.coreprocessor.repository.ProcessorStateRepository;
 import com.ceawse.coreprocessor.service.MarketProcessor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -14,12 +15,12 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.UUID;
 
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class ProcessorWorker {
-
     private final ProcessorStateRepository stateRepository;
     private final MarketProcessor marketProcessor;
     private final MongoTemplate mongoTemplate;
@@ -29,35 +30,43 @@ public class ProcessorWorker {
 
     @Scheduled(fixedDelayString = "${app.worker.delay:1000}")
     public void processBatch() {
-        ProcessorState state = getOrInitState();
+        String traceId = UUID.randomUUID().toString().substring(0, 8);
+        MDC.put("traceId", "PROC-" + traceId);
+        MDC.put("context", "BATCH");
 
-        List<GiftHistoryDocument> events = fetchNextBatch(state);
+        try {
+            ProcessorState state = getOrInitState();
+            List<GiftHistoryDocument> events = fetchNextBatch(state);
 
-        if (events.isEmpty()) {
-            return;
-        }
-
-        log.debug("Processing batch of {} events. Start form: timestamp={}, id={}",
-                events.size(), state.getLastProcessedTimestamp(), state.getLastProcessedId());
-
-        long maxTime = state.getLastProcessedTimestamp();
-        String maxId = state.getLastProcessedId();
-        boolean stateUpdated = false;
-
-        for (GiftHistoryDocument event : events) {
-            try {
-                marketProcessor.processEvent(event);
-            } catch (Exception e) {
-                log.error("Error processing event ID={}: {}", event.getId(), e.getMessage(), e);
-            } finally {
-                maxTime = event.getTimestamp();
-                maxId = event.getId();
-                stateUpdated = true;
+            if (events.isEmpty()) {
+                log.trace("No new events to process.");
+                return;
             }
-        }
 
-        if (stateUpdated) {
-            updateState(state, maxTime, maxId);
+            log.info("Starting batch processing of {} events.", events.size());
+
+            long maxTime = state.getLastProcessedTimestamp();
+            String maxId = state.getLastProcessedId();
+            boolean stateUpdated = false;
+
+            for (GiftHistoryDocument event : events) {
+                // Устанавливаем адрес предмета в контекст для логов внутри процессора
+                MDC.put("context", event.getAddress() != null ? event.getAddress() : "SYSTEM");
+                try {
+                    marketProcessor.processEvent(event);
+                    maxTime = event.getTimestamp();
+                    maxId = event.getId();
+                    stateUpdated = true;
+                } catch (Exception e) {
+                    log.error("Failed to process event ID={}: {}", event.getId(), e.getMessage(), e);
+                }
+            }
+
+            if (stateUpdated) {
+                updateState(state, maxTime, maxId);
+            }
+        } finally {
+            MDC.clear();
         }
     }
 
@@ -70,7 +79,8 @@ public class ProcessorWorker {
         state.setLastProcessedTimestamp(timestamp);
         state.setLastProcessedId(id);
         stateRepository.save(state);
-        log.info("Batch completed. New state: timestamp={}, id={}", timestamp, id);
+        MDC.put("context", "BATCH");
+        log.info("Batch completed. State updated to timestamp={}", timestamp);
     }
 
     private List<GiftHistoryDocument> fetchNextBatch(ProcessorState state) {
@@ -89,7 +99,6 @@ public class ProcessorWorker {
 
         query.with(Sort.by(Sort.Direction.ASC, "timestamp", "id"));
         query.limit(BATCH_SIZE);
-
         return mongoTemplate.find(query, GiftHistoryDocument.class);
     }
 }

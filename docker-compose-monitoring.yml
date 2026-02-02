@@ -10,26 +10,37 @@ services:
       - 8888:8080
     restart: unless-stopped
 
-  # Контейнер-прокси для лога GetGems
   log-getgems:
     image: alpine
     container_name: parser-getgems
     volumes:
-      - ./logs:/var/log/my-app-logs # Монтируем папку logs целиком
+      - ./logs:/var/log/my-app-logs
     command: tail -f /var/log/my-app-logs/getgems-parser.log
 
-  # Контейнер-прокси для лога Discovery
+  core-processor:
+    image: alpine
+    container_name: core-processor
+    volumes:
+      - ./logs:/var/log/my-app-logs
+    command: tail -f /var/log/my-app-logs/core-processor.log
+
   log-discovery:
     image: alpine
     container_name: discovery-service
     volumes:
-      - ./logs:/var/log/my-app-logs # Монтируем папку logs целиком
+      - ./logs:/var/log/my-app-logs
     command: tail -f /var/log/my-app-logs/gift-discovery.log
 
-  # Контейнер-прокси для лога Portals
   log-portals:
     image: alpine
     container_name: parser-portals
     volumes:
-      - ./logs:/var/log/my-app-logs # Монтируем папку logs целиком
+      - ./logs:/var/log/my-app-logs
     command: tail -f /var/log/my-app-logs/portals-parser.log
+
+  onchain-indexer:
+    image: alpine
+    container_name: onchain-indexer
+    volumes:
+      - ./logs:/var/log/my-app-logs
+    command: tail -f /var/log/my-app-logs/onchain-indexer.log

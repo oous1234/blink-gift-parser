@@ -4,6 +4,7 @@ import feign.Client;
 import feign.RequestInterceptor;
 import feign.okhttp.OkHttpClient;
 import okhttp3.ConnectionPool;
+import org.slf4j.MDC;
 import org.springframework.context.annotation.Bean;
 
 import java.net.InetSocketAddress;
@@ -20,7 +21,6 @@ public class GetGemsProxyConfig {
                 .proxy(new Proxy(Proxy.Type.HTTP, new InetSocketAddress("127.0.0.1", 8000)))
 
                 .connectionPool(new ConnectionPool(0, 1, TimeUnit.NANOSECONDS))
-                // ----------------------------------------------------
 
                 .connectTimeout(60, TimeUnit.SECONDS)
                 .readTimeout(120, TimeUnit.SECONDS)
@@ -38,6 +38,11 @@ public class GetGemsProxyConfig {
             template.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
 
             template.header("Connection", "close");
+
+            String traceId = MDC.get("traceId");
+            if (traceId != null) {
+                template.header("X-Trace-Id", traceId);
+            }
         };
     }
 }

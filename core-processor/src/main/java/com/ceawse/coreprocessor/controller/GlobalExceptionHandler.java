@@ -19,7 +19,6 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 @RequiredArgsConstructor
 public class GlobalExceptionHandler {
-
     private final MessageProvider messageProvider;
     private final ErrorResponseBuilder errorResponseBuilder;
 
@@ -32,19 +31,15 @@ public class GlobalExceptionHandler {
             InformationException exception
     ) {
         logRequestException(request, exception);
-
         String description = resolveLocalizedDescription(exception.getDescription(), exception.getMessage());
-
-        boolean showStacktrace = shouldShowStacktrace();
-
         return new ResponseEntity<>(
                 ErrorResponseDto.builder()
                         .informative(true)
                         .level(exception.getLevel())
                         .message(description)
-                        .stacktrace(showStacktrace ? exception.getStackTrace() : null)
+                        .stacktrace(shouldShowStacktrace() ? exception.getStackTrace() : null)
                         .build(),
-                HttpStatus.BAD_REQUEST // InformationException обычно это ошибка валидации или логики (400), а не 500
+                HttpStatus.BAD_REQUEST
         );
     }
 
@@ -54,28 +49,15 @@ public class GlobalExceptionHandler {
             ServiceException exception
     ) {
         logRequestException(request, exception);
-
         String description = resolveLocalizedDescription(exception.getDescription(), exception.getMessage());
-        boolean showStacktrace = shouldShowStacktrace();
-
         return new ResponseEntity<>(
                 ErrorResponseDto.builder()
                         .informative(false)
                         .message(description)
-                        .stacktrace(showStacktrace ? exception.getStackTrace() : null)
+                        .stacktrace(shouldShowStacktrace() ? exception.getStackTrace() : null)
                         .build(),
                 HttpStatus.INTERNAL_SERVER_ERROR
         );
-    }
-
-    // Обработка Access Denied (общего типа)
-    @ExceptionHandler({SecurityException.class})
-    public ResponseEntity<ErrorResponseDto> resolveAccessDeniedException(
-            HttpServletRequest request,
-            Exception exception
-    ) {
-        logRequestException(request, exception);
-        return errorResponseBuilder.makeResponse("access.denied.exception", HttpStatus.FORBIDDEN, exception, true);
     }
 
     @ExceptionHandler(Exception.class)
@@ -99,7 +81,9 @@ public class GlobalExceptionHandler {
     }
 
     private void logRequestException(HttpServletRequest request, Exception exception) {
-        log.error("Request: {} failed with exception: {}", request.getRequestURI(), exception.getMessage());
-        log.debug("Full stacktrace: ", exception);
+        log.error("Request failed: {} {} | Error: {}", request.getMethod(), request.getRequestURI(), exception.getMessage());
+        if (shouldShowStacktrace()) {
+            log.debug("Full stacktrace: ", exception);
+        }
     }
 }
