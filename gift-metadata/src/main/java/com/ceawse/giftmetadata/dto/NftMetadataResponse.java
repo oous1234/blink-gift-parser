@@ -1,20 +1,28 @@
 package com.ceawse.giftmetadata.dto;
 
 import lombok.Builder;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 @Builder
 public record NftMetadataResponse(
-        Integer collectibleId,
-        String nftName,
-        String owner,
+        String giftSlug,
+        String giftName,
+        Integer giftNum,
+        Integer giftMinted,
+        Integer giftTotal,
         String model,
+        Integer modelRare,
+        String pattern,
+        Integer patternRare,
         String backdrop,
-        String symbol,
-        String quantity,
-        String gradientFrom,
-        String gradientTo,
-        String patternPngUrl,
-        String patternTint,
-        String tgsUrl,
-        String pageUrl
+        Integer backdropRare,
+
+        Integer backdropCenterColor,
+        Integer backdropEdgeColor,
+        Integer backdropPatternColor,
+
+        String modelUrl,
+        String patternUrl,
+        String pageUrl,
+        String owner
 ) {}
