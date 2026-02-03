@@ -20,7 +20,7 @@ public class PortalsProxyConfig {
 
     @Bean
     Logger.Level feignLoggerLevel() {
-        return Logger.Level.FULL; // Включает полное логирование (Headers + Body)
+        return Logger.Level.BASIC; 
     }
 
     @Bean

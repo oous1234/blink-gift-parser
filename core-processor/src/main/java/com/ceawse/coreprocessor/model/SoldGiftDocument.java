@@ -37,4 +37,5 @@ public class SoldGiftDocument {
     private String backdrop;
     private Integer backdropRare;
     private String symbol;
+    private Integer symbolRare;
 }

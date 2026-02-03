@@ -70,6 +70,7 @@ public class MarketEventMapper {
                 .backdrop(event.getBackdrop())
                 .backdropRare(event.getBackdropRare())
                 .symbol(event.getSymbol())
+                .symbolRare(event.getSymbolRare())
                 .build();
     }
 

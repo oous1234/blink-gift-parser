@@ -32,12 +32,6 @@ server:
 portals:
   api-url: https://portal-market.com/api
 
-logging:
-  level:
-    com.ceawse.portalsparser.client: DEBUG
-    org.springframework.web: INFO
-    org.apache.coyote: INFO
-
 feign:
   client:
     config:
