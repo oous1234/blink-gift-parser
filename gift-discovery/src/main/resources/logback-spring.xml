@@ -1,14 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
+    <!-- Правила раскраски логов в консоли -->
     <conversionRule conversionWord="clr" converterClass="org.springframework.boot.logging.logback.ColorConverter" />
+
     <property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %clr(%5p) %clr([%X{traceId:-no-id}]){yellow} %clr([%X{context:-SYSTEM}]){magenta} %clr(%-40.40logger{39}){cyan} : %m%n"/>
 
+    <!-- 1. Вывод в консоль -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
             <pattern>${LOG_PATTERN}</pattern>
         </encoder>
     </appender>
 
+    <!-- 2. Вывод в файл (был у тебя раньше) -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>logs/gift-discovery.log</file>
         <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
@@ -22,9 +26,20 @@
         </encoder>
     </appender>
 
+    <!-- 3. НОВЫЙ: Отправка в Logstash (ELK) -->
+    <appender name="LOGSTASH" class="net.logstash.logback.appender.LogstashTcpSocketAppender">
+        <destination>localhost:50000</destination>
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <!-- Указываем имя приложения, чтобы в Кибане фильтровать по нему -->
+            <customFields>{"app_name":"gift-discovery"}</customFields>
+        </encoder>
+    </appender>
+
+    <!-- Настройка уровней логирования -->
     <root level="INFO">
         <appender-ref ref="CONSOLE" />
         <appender-ref ref="FILE" />
+        <appender-ref ref="LOGSTASH" />
     </root>
 
     <logger name="com.ceawse.giftdiscovery" level="DEBUG" />

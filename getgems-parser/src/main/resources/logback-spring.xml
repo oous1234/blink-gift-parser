@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
-    <conversionRule conversionWord="clr" converterClass="org.springframework.boot.logging.logback.ColorConverter" />
+    <conversionRule conversionWord="clr" class="org.springframework.boot.logging.logback.ColorConverter" />
 
     <property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %clr(%5p) %clr([%X{traceId:-no-id}]){yellow} %clr([%X{context:-SYSTEM}]){magenta} %clr(%-40.40logger{39}){cyan} : %m%n"/>
 
@@ -23,12 +23,20 @@
         </encoder>
     </appender>
 
+    <!-- 3. ДОБАВЛЕНО: Логсташ для getgems-parser -->
+    <appender name="LOGSTASH" class="net.logstash.logback.appender.LogstashTcpSocketAppender">
+        <destination>localhost:50000</destination>
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"app_name":"getgems-parser"}</customFields>
+        </encoder>
+    </appender>
+
     <root level="INFO">
         <appender-ref ref="CONSOLE" />
         <appender-ref ref="FILE" />
+        <appender-ref ref="LOGSTASH" />
     </root>
 
     <logger name="com.ceawse.blinkgift" level="DEBUG" />
-
     <logger name="com.ceawse.blinkgift.client" level="INFO" />
 </configuration>
