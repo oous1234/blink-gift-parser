@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: 'spring-boot-apps'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets:
+          - 'host.docker.internal:7778' # getgems-parser
+          - 'host.docker.internal:7779' # core-processor
+          - 'host.docker.internal:7780' # onchain-indexer
+          - 'host.docker.internal:7781' # gift-discovery
+          - 'host.docker.internal:7782' # portals-parser

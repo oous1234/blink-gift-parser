@@ -31,3 +31,16 @@ feign:
         connectTimeout: 5000
         readTimeout: 10000
         loggerLevel: basic
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: prometheus, health, info
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  prometheus:
+    metrics:
+      export:
+        enabled: true

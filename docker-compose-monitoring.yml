@@ -1,46 +1,41 @@
 version: '3.8'
 
 services:
-  dozzle:
-    image: amir20/dozzle:latest
-    container_name: dozzle
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: loki
     ports:
-      - 8888:8080
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml
+    command: -config.file=/etc/loki/local-config.yaml
     restart: unless-stopped
 
-  log-getgems:
-    image: alpine
-    container_name: parser-getgems
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: promtail
     volumes:
-      - ./logs:/var/log/my-app-logs
-    command: tail -f /var/log/my-app-logs/getgems-parser.log
+      - ./logs:/var/log/my-app-logs:ro
+      - ./monitoring/promtail-config.yml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+    restart: unless-stopped
 
-  core-processor:
-    image: alpine
-    container_name: core-processor
-    volumes:
-      - ./logs:/var/log/my-app-logs
-    command: tail -f /var/log/my-app-logs/core-processor.log
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    restart: unless-stopped
 
-  log-discovery:
-    image: alpine
-    container_name: discovery-service
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
     volumes:
-      - ./logs:/var/log/my-app-logs
-    command: tail -f /var/log/my-app-logs/gift-discovery.log
-
-  log-portals:
-    image: alpine
-    container_name: parser-portals
-    volumes:
-      - ./logs:/var/log/my-app-logs
-    command: tail -f /var/log/my-app-logs/portals-parser.log
-
-  onchain-indexer:
-    image: alpine
-    container_name: onchain-indexer
-    volumes:
-      - ./logs:/var/log/my-app-logs
-    command: tail -f /var/log/my-app-logs/onchain-indexer.log
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
