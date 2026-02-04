@@ -45,6 +45,7 @@ public class MarketProcessorImpl implements MarketProcessor {
             case SNAPSHOT_FINISH -> handleSnapshotFinish(event);
         }
     }
+    // todo
 
     private void handleListing(GiftHistoryDocument event) {
         BigDecimal price = new BigDecimal(event.getPrice() != null ? event.getPrice() : "0");
