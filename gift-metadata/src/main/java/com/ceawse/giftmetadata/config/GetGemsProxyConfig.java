@@ -17,15 +17,14 @@ public class GetGemsProxyConfig {
     @Bean
     public Client feignClient() {
         okhttp3.OkHttpClient delegate = new okhttp3.OkHttpClient.Builder()
+                .protocols(java.util.Collections.singletonList(okhttp3.Protocol.HTTP_1_1))
+
                 .proxy(new Proxy(Proxy.Type.HTTP, new InetSocketAddress("127.0.0.1", 8000)))
-
-                .connectionPool(new ConnectionPool(0, 1, TimeUnit.NANOSECONDS))
-
-                .connectTimeout(60, TimeUnit.SECONDS)
-                .readTimeout(120, TimeUnit.SECONDS)
-                .writeTimeout(90, TimeUnit.SECONDS)
+                .connectionPool(new okhttp3.ConnectionPool(0, 1, java.util.concurrent.TimeUnit.NANOSECONDS))
+                .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
+                .writeTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
                 .build();
-
         return new OkHttpClient(delegate);
     }
 
