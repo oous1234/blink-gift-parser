@@ -1,39 +1,48 @@
+# --- Общие файлы и папки ---
 HELP.md
 .gradle
-build/
-!gradle/wrapper/gradle-wrapper.jar
-!**/src/main/**/build/
-!**/src/test/**/build/
+**/build/
+**/bin/
+**/out/
+logs/
+**/logs/
+*.log
 
-### STS ###
+# --- Удаление Gradle Wrapper (тот самый "шлак") ---
+# Эти правила удалят gradlew и папку gradle во всех подмодулях и в корне
+gradlew
+**/gradlew
+gradlew.bat
+**/gradlew.bat
+gradle/
+**/gradle/
+
+# --- IntelliJ IDEA ---
+.idea/
+*.iws
+*.iml
+*.ipr
+**/out/
+
+# --- VS Code ---
+.vscode/
+
+# --- Eclipse / STS ---
 .apt_generated
 .classpath
 .factorypath
 .project
-.settings
+.settings/
 .springBeans
 .sts4-cache
-bin/
-!**/src/main/**/bin/
-!**/src/test/**/bin/
 
-### IntelliJ IDEA ###
-.idea
-*.iws
-*.iml
-*.ipr
-out/
-!**/src/main/**/out/
-!**/src/test/**/out/
-
-### NetBeans ###
+# --- NetBeans ---
 /nbproject/private/
 /nbbuild/
 /dist/
 /nbdist/
 /.nb-gradle/
 
-### VS Code ###
-.vscode/
-
-logs/
+# --- Системный мусор ---
+.DS_Store
+Thumbs.db
