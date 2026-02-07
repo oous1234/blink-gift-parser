@@ -1,6 +1,6 @@
 import logging
 from telethon import TelegramClient
-from .config import settings
+from config import settings
 
 logger = logging.getLogger(__name__)
 

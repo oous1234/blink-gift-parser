@@ -1,10 +1,10 @@
 import uvicorn
 from fastapi import FastAPI, Query, HTTPException
 from contextlib import asynccontextmanager
-from .tg_client import tg_session
-from .service import TelegramService
-from .schemas import InventoryResponse, GiftMetadataResponse
-from .config import settings
+from tg_client import tg_session
+from service import TelegramService
+from schemas import InventoryResponse, GiftMetadataResponse
+from config import settings
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
