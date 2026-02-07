@@ -21,6 +21,7 @@ public class UniqueGiftDocument {
     private String id;
 
     private String name;
+    private String slug;
     private Integer giftNum;
     private Integer giftMinted;
     private Integer giftTotal;
@@ -47,6 +48,7 @@ public class UniqueGiftDocument {
     private String pageUrl;
 
     private MarketData marketData;
+    private Boolean isResalable;
 
     private Instant createdAt;
     private Instant updatedAt;
