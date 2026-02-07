@@ -3,7 +3,7 @@ from typing import List, Optional, Dict
 from datetime import datetime
 
 class InventoryItem(BaseModel):
-    gift_id: int
+    gift_id: str  # Изменено на str для надежности с большими ID
     slug: str
     date: datetime
     nft_address: Optional[str] = None
@@ -22,7 +22,7 @@ class GiftAttribute(BaseModel):
     colors: Optional[Dict[str, str]] = None
 
 class GiftMetadataResponse(BaseModel):
-    id: int
+    id: str # Изменено на str
     title: str
     slug: str
     serial_number: int

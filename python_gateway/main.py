@@ -12,7 +12,7 @@ async def lifespan(app: FastAPI):
     yield
     await tg_session.disconnect()
 
-app = FastAPI(title="MTProto Fast Worker", lifespan=lifespan)
+app = FastAPI(title="MTProto Gift Worker", lifespan=lifespan)
 
 @app.get("/api/v1/inventory/live", response_model=InventoryResponse)
 async def get_inventory_live(
@@ -30,7 +30,7 @@ async def get_metadata_fast(slug: str):
     try:
         return await TelegramService.get_gift_metadata(slug)
     except Exception as e:
-        raise HTTPException(status_code=404, detail=f"Metadata not found for slug: {slug}")
+        raise HTTPException(status_code=404, detail=f"Metadata not found or error: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host=settings.HOST, port=settings.PORT)

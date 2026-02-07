@@ -5,11 +5,7 @@ from schemas import InventoryItem, InventoryResponse, GiftMetadataResponse, Gift
 class TelegramService:
     @staticmethod
     async def get_user_inventory(user_id: str, offset: str = "", limit: int = 100) -> InventoryResponse:
-        """
-        Получение списка уникальных подарков пользователя через MTProto.
-        """
         try:
-            # Определяем цель: ID, username или 'me'
             if user_id.lower() == "me":
                 target = "me"
             elif user_id.isdigit():
@@ -18,8 +14,6 @@ class TelegramService:
                 target = user_id
 
             entity = await tg_session.client.get_entity(target)
-
-            # Запрос к Telegram
             result = await tg_session.client(functions.payments.GetSavedStarGiftsRequest(
                 peer=entity,
                 offset=offset if offset else "",
@@ -30,7 +24,8 @@ class TelegramService:
             items = []
             for item in result.gifts:
                 gift = item.gift
-                if not isinstance(gift, types.StarGiftUnique):
+                # Проверка через имя класса, если типы еще не обновились в библиотеке
+                if gift.__class__.__name__ != 'StarGiftUnique':
                     continue
 
                 items.append(InventoryItem(
@@ -45,7 +40,7 @@ class TelegramService:
                 user_id=str(user_id),
                 total_count=getattr(result, 'count', len(items)),
                 items=items,
-                next_offset=result.next_offset if hasattr(result, 'next_offset') else None
+                next_offset=getattr(result, 'next_offset', None)
             )
         except Exception as e:
             print(f"Error in get_user_inventory: {e}")
@@ -53,33 +48,32 @@ class TelegramService:
 
     @staticmethod
     async def get_gift_metadata(slug: str) -> GiftMetadataResponse:
-        """
-        Получение детальной информации о шаблоне подарка.
-        """
         try:
             result = await tg_session.client(functions.payments.GetUniqueStarGiftRequest(slug=slug))
             gift = result.gift
-
             attributes = []
+
             for attr in getattr(gift, 'attributes', []):
-                if isinstance(attr, types.StarGiftAttributeModel):
+                attr_type = attr.__class__.__name__
+
+                if attr_type == 'StarGiftAttributeModel':
                     attributes.append(GiftAttribute(
                         type="model",
                         name=attr.name,
                         rarity_percent=attr.rarity_permille / 10
                     ))
-                elif isinstance(attr, types.StarGiftAttributeBackdrop):
+                elif attr_type == 'StarGiftAttributeBackdrop':
                     attributes.append(GiftAttribute(
                         type="backdrop",
                         name=attr.name,
                         rarity_percent=attr.rarity_permille / 10,
                         colors={
-                            "center": hex(attr.center_color),
-                            "edge": hex(attr.edge_color),
-                            "text": hex(attr.text_color)
+                            "center": hex(getattr(attr, 'center_color', 0)),
+                            "edge": hex(getattr(attr, 'edge_color', 0)),
+                            "text": hex(getattr(attr, 'text_color', 0))
                         }
                     ))
-                elif isinstance(attr, types.StarGiftAttributeSymbol):
+                elif attr_type == 'StarGiftAttributeSymbol':
                     attributes.append(GiftAttribute(
                         type="symbol",
                         name=attr.name,
@@ -87,14 +81,14 @@ class TelegramService:
                     ))
 
             return GiftMetadataResponse(
-                id=gift.id,
+                id=str(gift.id),
                 title=gift.title,
                 slug=gift.slug,
                 serial_number=gift.num,
                 total_issued=gift.availability_total,
                 owner_id=getattr(gift.owner_id, 'user_id', None) if gift.owner_id else None,
-                owner_name=gift.owner_name,
-                owner_address=gift.owner_address,
+                owner_name=getattr(gift, 'owner_name', None),
+                owner_address=getattr(gift, 'owner_address', None),
                 attributes=attributes,
                 is_resalable=getattr(gift, 'can_export', False) or hasattr(gift, 'resell_amount'),
                 price_amount=getattr(gift, 'value_amount', None),
