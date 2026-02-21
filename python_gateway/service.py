@@ -9,46 +9,34 @@ logger = logging.getLogger(__name__)
 class TelegramService:
     @staticmethod
     async def resolve_peer(user_id: str):
-        """
-        Логика резолва сущности, адаптированная из твоего tele_manager.py
-        """
         try:
-            # 1. Обработка 'me'
             if user_id.lower() == "me":
                 return await tg_session.client.get_me()
 
-            # 2. Если передан числовой ID
             if user_id.isdigit() or (user_id.startswith('-') and user_id[1:].isdigit()):
                 search_id = int(user_id)
                 try:
-                    # Пытаемся достать из кэша сессии
                     return await tg_session.client.get_entity(search_id)
                 except (ValueError, errors.rpcerrorlist.PeerIdInvalidError):
-                    # Если в кэше нет, пробуем "прогрузить" через GetFullUser
-                    # Для сессии пользователя (не бота) это часто срабатывает
                     logger.info(f"ID {search_id} not in cache, forcing full user lookup...")
                     full_info = await tg_session.client(functions.users.GetFullUserRequest(id=search_id))
                     return full_info.users[0]
 
-            # 3. Если передан username или ссылка
             return await tg_session.client.get_entity(user_id)
-
         except Exception as e:
             logger.error(f"Entity search error for {user_id}: {e}")
-            # Если совсем не нашли - кидаем 404 как в твоем tele_manager
             raise HTTPException(status_code=404, detail=f"User entity not found: {str(e)}")
 
     @staticmethod
     async def get_user_inventory(user_id: str, offset: str = "", limit: int = 100) -> InventoryResponse:
         """
-        Получение инвентаря с использованием улучшенного резолва
+        Получение инвентаря с приведением числовых ID к строкам для валидации схем.
         """
         try:
             entity = await TelegramService.resolve_peer(user_id)
-
             result = await tg_session.client(functions.payments.GetSavedStarGiftsRequest(
                 peer=entity,
-                offset=offset if offset else "0", # В твоем коде был str(offset)
+                offset=offset if offset else "0",
                 limit=limit,
                 exclude_unlimited=True
             ))
@@ -64,8 +52,9 @@ class TelegramService:
 
                 nft_address = getattr(gift_raw, 'gift_address', None)
 
+                # Исправлено: приведение gift_raw.id (int) -> str()
                 gifts.append(InventoryItem(
-                    gift_id=gift_raw.id,
+                    gift_id=str(gift_raw.id),
                     slug=gift_raw.slug,
                     date=item.date,
                     nft_address=nft_address,
@@ -87,7 +76,7 @@ class TelegramService:
     @staticmethod
     async def get_gift_metadata(slug: str) -> GiftMetadataResponse:
         """
-        Получение метаданных (логика из твоего get_gift_by_slug)
+        Получение метаданных с корректным приведением типов ID.
         """
         try:
             result = await tg_session.client(functions.payments.GetUniqueStarGiftRequest(slug=slug))
@@ -96,7 +85,6 @@ class TelegramService:
             attributes = []
             for attr in getattr(gift, 'attributes', []):
                 attr_name = type(attr).__name__
-
                 if attr_name == 'StarGiftAttributeModel':
                     attributes.append(GiftAttribute(
                         type="model",
@@ -121,13 +109,21 @@ class TelegramService:
                         rarity_percent=attr.rarity_permille / 10
                     ))
 
+            # Попытка извлечь ID владельца, если он есть
+            owner_id = None
+            if gift.owner_id:
+                if isinstance(gift.owner_id, types.PeerUser):
+                    owner_id = gift.owner_id.user_id
+                elif hasattr(gift.owner_id, 'user_id'):
+                    owner_id = gift.owner_id.user_id
+
             return GiftMetadataResponse(
-                id=gift.id,
+                id=str(gift.id), # Исправлено: int -> str
                 title=gift.title,
                 slug=gift.slug,
                 serial_number=gift.num,
                 total_issued=gift.availability_total,
-                owner_id=getattr(gift.owner_id, 'user_id', None) if gift.owner_id else None,
+                owner_id=owner_id,
                 owner_name=gift.owner_name,
                 owner_address=gift.owner_address,
                 attributes=attributes,
