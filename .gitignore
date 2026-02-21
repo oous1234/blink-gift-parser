@@ -46,3 +46,7 @@ gradle/
 # --- Системный мусор ---
 .DS_Store
 Thumbs.db
+
+python_gateway/venv/
+python_gateway/__pycache__/
+python_gateway/*.session
