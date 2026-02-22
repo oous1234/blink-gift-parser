@@ -50,3 +50,4 @@ Thumbs.db
 python_gateway/venv/
 python_gateway/__pycache__/
 python_gateway/*.session
+python_gateway/sessions/
