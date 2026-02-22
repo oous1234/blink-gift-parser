@@ -4,7 +4,7 @@ import com.ceawse.giftdiscovery.client.PythonGatewayClient;
 import com.ceawse.giftdiscovery.dto.external.PythonInventoryResponse;
 import com.ceawse.giftdiscovery.model.UniqueGiftDocument;
 import com.ceawse.giftdiscovery.model.UserInventoryDocument;
-import com.ceawse.giftdiscovery.repository.UniqueGiftRepository;
+import com.ceawse.giftdiscovery.service.EnrichmentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.mongodb.core.BulkOperations;
@@ -22,38 +22,40 @@ import java.time.Instant;
 public class InventoryFullScanWorker {
 
     private final PythonGatewayClient pythonClient;
-    private final UniqueGiftRepository uniqueGiftRepository;
+    private final EnrichmentService enrichmentService;
     private final MongoTemplate mongoTemplate;
 
     public void performFullScan(String userId, int expectedTotal) {
-        log.info("Starting full inventory scan and persistence for user: {}", userId);
+        log.info("Starting full inventory scan for user: {} (expected: {})", userId, expectedTotal);
         String cursor = "";
         int processedCount = 0;
 
         try {
-            // Очищаем старый инвентарь перед полной пересинхронизацией
             mongoTemplate.remove(new Query(Criteria.where("userId").is(userId)), "user_inventory");
 
             while (processedCount < expectedTotal) {
+                log.debug("Fetching batch for user {} with offset {}", userId, cursor);
                 PythonInventoryResponse batch = pythonClient.getInventoryLive(userId, cursor, 50);
-                if (batch.getItems().isEmpty()) break;
+
+                if (batch.getItems() == null || batch.getItems().isEmpty()) {
+                    break;
+                }
 
                 BulkOperations bulkOps = mongoTemplate.bulkOps(BulkOperations.BulkMode.UNORDERED, UserInventoryDocument.class);
 
                 for (var item : batch.getItems()) {
-                    // Ищем метаданные в глобальном реестре
-                    UniqueGiftDocument globalGift = uniqueGiftRepository.findById(item.getSlug()).orElse(null);
+                    UniqueGiftDocument globalGift = enrichmentService.getOrCreateUniqueGift(item.getSlug());
 
                     UserInventoryDocument invItem = UserInventoryDocument.builder()
                             .id(item.getNft_address() != null ? item.getNft_address() : item.getGift_id())
                             .userId(userId)
                             .slug(item.getSlug())
-                            .name(globalGift != null ? globalGift.getName() : "Gift #" + item.getSerial_number())
+                            .name(globalGift.getName() != null ? globalGift.getName() : "Gift #" + item.getSerial_number())
                             .serialNumber(item.getSerial_number())
-                            .model(globalGift != null ? globalGift.getModel() : "Unknown")
-                            .backdrop(globalGift != null ? globalGift.getBackdrop() : "Unknown")
-                            .symbol(globalGift != null ? globalGift.getSymbol() : "Unknown")
-                            .estimatedPrice(globalGift != null && globalGift.getMarketData() != null ?
+                            .model(globalGift.getModel())
+                            .backdrop(globalGift.getBackdrop())
+                            .symbol(globalGift.getSymbol())
+                            .estimatedPrice(globalGift.getMarketData() != null ?
                                     globalGift.getMarketData().getEstimatedPrice() : null)
                             .acquiredAt(item.getDate())
                             .image("https://nft.fragment.com/gift/" + item.getSlug().toLowerCase() + ".medium.jpg")
@@ -61,16 +63,21 @@ public class InventoryFullScanWorker {
 
                     bulkOps.insert(invItem);
                 }
-                bulkOps.execute();
 
+                bulkOps.execute();
                 processedCount += batch.getItems().size();
                 cursor = batch.getNext_offset();
-                if (cursor == null || cursor.isBlank()) break;
+
+                if (cursor == null || cursor.isBlank()) {
+                    break;
+                }
             }
 
             markSyncAsCompleted(userId, processedCount);
+            log.info("Full scan completed for user {}. Processed {} items.", userId, processedCount);
+
         } catch (Exception e) {
-            log.error("Failed full scan for user {}: {}", userId, e.getMessage());
+            log.error("Failed full scan for user {}: {}", userId, e.getMessage(), e);
             markSyncAsFailed(userId);
         }
     }

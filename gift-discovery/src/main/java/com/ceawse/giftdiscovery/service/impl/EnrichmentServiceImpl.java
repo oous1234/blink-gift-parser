@@ -6,7 +6,7 @@ import com.ceawse.giftdiscovery.dto.external.PythonMetadataResponse;
 import com.ceawse.giftdiscovery.model.UniqueGiftDocument;
 import com.ceawse.giftdiscovery.repository.UniqueGiftRepository;
 import com.ceawse.giftdiscovery.service.EnrichmentService;
-import com.ceawse.giftdiscovery.service.PriceEstimationService;
+import com.ceawse.giftdiscovery.service.MarketDataService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -21,33 +21,23 @@ public class EnrichmentServiceImpl implements EnrichmentService {
 
     private final UniqueGiftRepository uniqueGiftRepository;
     private final PythonGatewayClient pythonClient;
-    private final PriceEstimationService priceEstimationService;
+    private final MarketDataService marketDataService;
 
     @Override
-    public void processInventoryBatch(String userId, List<PythonInventoryResponse.InventoryItem> items) {
-        for (var item : items) {
-            String slug = item.getSlug();
-
-            // Проверяем, есть ли этот ТИП подарка в нашем глобальном справочнике
-            // Используем existsById, так как slug у нас является первичным ключом
-            if (!uniqueGiftRepository.existsById(slug)) {
-                log.info("New gift type detected: {}. Fetching heavy metadata...", slug);
-                enrichNewGiftType(slug);
-            }
-
-            // Здесь в будущем можно добавить логику связывания конкретного
-            // экземпляра юзера с этими метаданными (денормализация в user_inventory)
-        }
+    public UniqueGiftDocument getOrCreateUniqueGift(String slug) {
+        return uniqueGiftRepository.findById(slug)
+                .orElseGet(() -> enrichNewGiftType(slug));
     }
 
-    private void enrichNewGiftType(String slug) {
+    private UniqueGiftDocument enrichNewGiftType(String slug) {
         try {
-            // Запрос к Python-шлюзу (MTProto)
+            log.info("Enriching new gift type from Python Gateway: {}", slug);
             PythonMetadataResponse meta = pythonClient.getMetadataFast(slug);
 
             UniqueGiftDocument doc = UniqueGiftDocument.builder()
                     .id(meta.getSlug())
                     .name(meta.getTitle())
+                    .slug(meta.getSlug())
                     .giftNum(meta.getSerial_number())
                     .giftTotal(meta.getTotal_issued())
                     .model(extractAttribute(meta, "model"))
@@ -58,21 +48,61 @@ public class EnrichmentServiceImpl implements EnrichmentService {
                     .updatedAt(Instant.now())
                     .build();
 
-            uniqueGiftRepository.save(doc);
-            log.debug("Successfully enriched and saved global gift: {}", slug);
+            enrichWithMarketData(doc);
 
-
+            log.debug("Saving enriched gift to unique_gifts: {}", slug);
+            return uniqueGiftRepository.save(doc);
         } catch (Exception e) {
-            log.error("Failed to fetch heavy metadata for slug {}: {}", slug, e.getMessage());
+            log.error("Failed to fetch metadata for slug {}: {}", slug, e.getMessage());
+            return createFallbackGift(slug);
+        }
+    }
+
+    private void enrichWithMarketData(UniqueGiftDocument gift) {
+        try {
+            String colAddr = marketDataService.resolveCollectionAddress(gift.getName(), null);
+            gift.setCollectionAddress(colAddr);
+
+            var modelData = marketDataService.getAttributeData(colAddr, "Model", gift.getModel());
+            var backdropData = marketDataService.getAttributeData(colAddr, "Backdrop", gift.getBackdrop());
+
+            UniqueGiftDocument.MarketData marketData = UniqueGiftDocument.MarketData.builder()
+                    .collectionFloorPrice(marketDataService.getCollectionFloor(colAddr))
+                    .modelFloorPrice(modelData != null ? modelData.getPrice() : null)
+                    .backdropFloorPrice(backdropData != null ? backdropData.getPrice() : null)
+                    .priceUpdatedAt(Instant.now())
+                    .build();
+
+            marketData.setEstimatedPrice(marketData.getCollectionFloorPrice());
+            gift.setMarketData(marketData);
+        } catch (Exception e) {
+            log.warn("Could not enrich market data for {}: {}", gift.getId(), e.getMessage());
         }
     }
 
     private String extractAttribute(PythonMetadataResponse meta, String type) {
-        if (meta.getAttributes() == null) return null;
+        if (meta.getAttributes() == null) return "Original";
         return meta.getAttributes().stream()
                 .filter(a -> type.equalsIgnoreCase(a.getType()))
                 .map(PythonMetadataResponse.Attribute::getName)
                 .findFirst()
                 .orElse("Original");
+    }
+
+    private UniqueGiftDocument createFallbackGift(String slug) {
+        return UniqueGiftDocument.builder()
+                .id(slug)
+                .name("Unknown Gift")
+                .model("Unknown")
+                .backdrop("Unknown")
+                .symbol("Unknown")
+                .build();
+    }
+
+    @Override
+    public void processInventoryBatch(String userId, List<PythonInventoryResponse.InventoryItem> items) {
+        for (var item : items) {
+            getOrCreateUniqueGift(item.getSlug());
+        }
     }
 }
