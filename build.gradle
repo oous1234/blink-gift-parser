@@ -31,6 +31,8 @@ subprojects {
     }
 
     dependencies {
+        implementation 'jakarta.persistence:jakarta.persistence-api'
+
         compileOnly 'org.projectlombok:lombok'
         annotationProcessor 'org.projectlombok:lombok'
 

@@ -10,12 +10,9 @@ logs/
 
 # --- Удаление Gradle Wrapper (тот самый "шлак") ---
 # Эти правила удалят gradlew и папку gradle во всех подмодулях и в корне
-gradlew
 **/gradlew
 gradlew.bat
 **/gradlew.bat
-gradle/
-**/gradle/
 
 # --- IntelliJ IDEA ---
 .idea/

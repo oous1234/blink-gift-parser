@@ -21,7 +21,6 @@ public class MarketEventMapper {
                 .marketplace(event.getMarketplace())
                 .isOffchain(Boolean.TRUE.equals(event.getIsOffchain()))
                 .listedAt(Instant.ofEpochMilli(event.getTimestamp()))
-                .lastSnapshotId(event.getSnapshotId())
                 .updatedAt(Instant.now())
                 .model(event.getModel())
                 .modelRare(event.getModelRare())
@@ -45,10 +44,6 @@ public class MarketEventMapper {
         if (event.getModel() != null) sale.setModel(event.getModel());
         if (event.getBackdrop() != null) sale.setBackdrop(event.getBackdrop());
         if (event.getSymbol() != null) sale.setSymbol(event.getSymbol());
-
-        if (event.getSnapshotId() != null) {
-            sale.setLastSnapshotId(event.getSnapshotId());
-        }
     }
 
     public SoldGiftDocument toSoldGift(GiftHistoryDocument event) {

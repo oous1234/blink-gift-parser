@@ -26,8 +26,26 @@ public interface GetGemsApiClient {
             @RequestParam("reverse") boolean reverse
     );
 
+    @GetMapping("/v1/nfts/on-sale/{collectionAddress}")
+    GetGemsSalePageDto getOnSale(
+            @PathVariable("collectionAddress") String collectionAddress,
+            @RequestParam("limit") int limit,
+            @RequestParam(value = "after", required = false) String cursor
+    );
+
+    @GetMapping("/v1/nft/{address}")
+    GetGemsNftDetailDto getNftDetails(@PathVariable("address") String address);
+
+    @GetMapping("/v1/collection/attributes/{collectionAddress}")
+    GetGemsAttributesDto getAttributes(
+            @PathVariable("collectionAddress") String collectionAddress
+    );
+
     @GetMapping("/v1/collection/stats/{collectionAddress}")
     GetGemsCollectionStatsDto getCollectionStats(
             @PathVariable("collectionAddress") String collectionAddress
     );
+
+    @GetMapping("/v1/collections/{address}")
+    GetGemsCollectionDto getCollection(@PathVariable("address") String address);
 }
