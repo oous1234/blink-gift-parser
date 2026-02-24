@@ -33,44 +33,6 @@ public class PortalsServiceImpl implements PortalsService {
     private static final String REALTIME_PROCESS_ID = "PORTALS_LIVE";
 
     @Override
-    @Async("taskExecutor")
-    public void runSnapshot() {
-        String snapshotId = UUID.randomUUID().toString().substring(0, 8);
-        log.info(">>> STARTING PORTALS SNAPSHOT ID={}", snapshotId);
-        long startTime = System.currentTimeMillis();
-        int offset = 0;
-        int limit = 50;
-
-        try {
-            while (true) {
-                PortalsSearchResponseDto response = apiClient.searchNfts(
-                        offset, limit, "price asc", "listed", true
-                );
-
-                if (response == null || response.getResults() == null || response.getResults().isEmpty()) break;
-
-                for (PortalsNftDto nft : response.getResults()) {
-                    PortalsGiftHistoryDocument doc = mapper.mapSnapshotToHistory(nft, snapshotId);
-
-                    // Обогащение
-                    enrichWithDiscovery(doc, nft);
-
-                    historyRepository.save(doc);
-                }
-
-                log.info("Portals Snapshot: processed offset {}", offset);
-                offset += limit;
-                Thread.sleep(200);
-            }
-
-            historyRepository.save(mapper.createSnapshotFinishEvent(snapshotId, startTime));
-            log.info(">>> PORTALS SNAPSHOT {} FINISHED.", snapshotId);
-        } catch (Exception e) {
-            log.error("Portals Snapshot CRITICAL failed", e);
-        }
-    }
-
-    @Override
     public void processRealtimeEvents() {
         try {
             PortalsIngestionState state = stateRepository.findById(REALTIME_PROCESS_ID)

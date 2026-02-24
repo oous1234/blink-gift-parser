@@ -8,5 +8,5 @@ import org.springframework.web.bind.annotation.RequestBody;
 @FeignClient(name = "discoveryInternalClient", url = "${app.services.discovery-url:http://localhost:7781}")
 public interface DiscoveryInternalClient {
     @PostMapping("/internal/v1/enrichment/calculate")
-    void calculate(@RequestBody InternalEnrichmentDto.Request request); // Возвращает void
+    void calculate(@RequestBody InternalEnrichmentDto.Request request);
 }

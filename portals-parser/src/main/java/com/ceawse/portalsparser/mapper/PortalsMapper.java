@@ -16,26 +16,6 @@ public class PortalsMapper {
     private static final String CURRENCY_TON = "TON";
     private static final BigDecimal NANO_MULTIPLIER = BigDecimal.valueOf(1_000_000_000);
 
-    public PortalsGiftHistoryDocument mapSnapshotToHistory(PortalsNftDto nft, String snapshotId) {
-        PortalsGiftHistoryDocument doc = new PortalsGiftHistoryDocument();
-        doc.setMarketplace(MARKETPLACE_NAME);
-        doc.setEventType("SNAPSHOT_LIST");
-        doc.setSnapshotId(snapshotId);
-        doc.setTimestamp(System.currentTimeMillis());
-        doc.setAddress(nft.getId());
-        doc.setCollectionAddress(nft.getCollectionId());
-        doc.setName(formatName(nft.getName(), nft.getExternalCollectionNumber()));
-        doc.setIsOffchain(true);
-        doc.setHash(snapshotId + "_" + nft.getId());
-
-        if (StringUtils.hasText(nft.getPrice())) {
-            doc.setPrice(nft.getPrice());
-            doc.setPriceNano(toNano(nft.getPrice()));
-            doc.setCurrency(CURRENCY_TON);
-        }
-        return doc;
-    }
-
     public PortalsGiftHistoryDocument mapActionToHistory(PortalsActionsResponseDto.ActionDto action, long timestamp) {
         PortalsGiftHistoryDocument doc = new PortalsGiftHistoryDocument();
         doc.setMarketplace(MARKETPLACE_NAME);
@@ -81,19 +61,6 @@ public class PortalsMapper {
         // Portals: "Winter Wreath" + 19852 -> "WinterWreath-19852"
         String base = nft.getName().replaceAll("\\s+", "");
         return base + "-" + nft.getExternalCollectionNumber();
-    }
-
-    public PortalsGiftHistoryDocument createSnapshotFinishEvent(String snapshotId, long startTime) {
-        PortalsGiftHistoryDocument doc = new PortalsGiftHistoryDocument();
-        doc.setMarketplace(MARKETPLACE_NAME);
-        doc.setEventType("SNAPSHOT_FINISH");
-        doc.setSnapshotId(snapshotId);
-        doc.setTimestamp(System.currentTimeMillis());
-        doc.setEventPayload(String.valueOf(startTime));
-        doc.setHash("PORTALS_FINISH_" + snapshotId);
-        doc.setAddress("SYSTEM_PORTALS");
-        doc.setCollectionAddress("SYSTEM_PORTALS");
-        return doc;
     }
 
     private String formatName(String rawName, Long number) {

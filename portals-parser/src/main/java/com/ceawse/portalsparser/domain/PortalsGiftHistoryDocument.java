@@ -42,9 +42,5 @@ public class PortalsGiftHistoryDocument {
     private Integer giftTotal;
 
     @Indexed
-    private String snapshotId;
-    private String eventPayload;
-
-    @Indexed
     private String marketplace;
 }

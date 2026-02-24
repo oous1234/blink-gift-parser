@@ -36,9 +36,6 @@ public class CurrentSaleDocument {
     private String marketplace;
 
     @Indexed
-    private String lastSnapshotId;
-
-    @Indexed
     private String model;
     private Integer modelRare;
 

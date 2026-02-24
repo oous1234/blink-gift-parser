@@ -36,28 +36,6 @@ public class EventMapper {
         return doc;
     }
 
-    public GiftHistoryDocument toSnapshotEntity(GetGemsSaleItemDto item, String snapshotId) {
-        GiftHistoryDocument doc = new GiftHistoryDocument();
-        doc.setMarketplace(MARKETPLACE_GETGEMS);
-        doc.setEventType("SNAPSHOT_LIST");
-        doc.setSnapshotId(snapshotId);
-        doc.setTimestamp(System.currentTimeMillis());
-        doc.setAddress(item.getAddress());
-        doc.setCollectionAddress(item.getCollectionAddress());
-        doc.setName(item.getName());
-        doc.setIsOffchain(item.isOffchain());
-        doc.setHash(snapshotId + "_" + item.getAddress());
-
-        if (item.getSale() != null) {
-            String nano = item.getSale().getFullPrice();
-            doc.setPriceNano(nano);
-            doc.setPrice(fromNano(nano));
-            doc.setCurrency(item.getSale().getCurrency());
-            doc.setOldOwner(item.getOwnerAddress());
-        }
-        return doc;
-    }
-
     public void enrichHistory(GiftHistoryDocument doc, DiscoveryInternalClient.MetadataResponse meta) {
         if (meta == null) return;
         doc.setModel(meta.getModel());
@@ -70,23 +48,9 @@ public class EventMapper {
         doc.setGiftTotal(meta.getGiftTotal());
     }
 
-    public GiftHistoryDocument createSnapshotFinishEvent(String snapshotId, long startTime, String marketplace) {
-        GiftHistoryDocument doc = new GiftHistoryDocument();
-        doc.setMarketplace(marketplace);
-        doc.setEventType("SNAPSHOT_FINISH");
-        doc.setSnapshotId(snapshotId);
-        doc.setTimestamp(System.currentTimeMillis());
-        doc.setEventPayload(String.valueOf(startTime));
-        doc.setHash("FINISH_" + marketplace.toUpperCase() + "_" + snapshotId);
-        doc.setAddress("SYSTEM");
-        doc.setCollectionAddress("SYSTEM");
-        return doc;
-    }
-
     public String createSlug(String name) {
         if (name == null) return null;
         try {
-            // Из "Winter Wreath #19852" -> "WinterWreath-19852"
             String cleanName = name.split("#")[0].replaceAll("\\s+", "");
             String number = name.split("#")[1].split(" ")[0].trim();
             return cleanName + "-" + number;
@@ -103,14 +67,5 @@ public class EventMapper {
             case "cancelsale", "cancel_sale" -> "CANCELSALE";
             default -> rawType.toUpperCase();
         };
-    }
-
-    private String fromNano(String nano) {
-        if (nano == null) return "0";
-        try {
-            return new BigDecimal(nano).divide(BigDecimal.valueOf(1_000_000_000)).toPlainString();
-        } catch (Exception e) {
-            return "0";
-        }
     }
 }

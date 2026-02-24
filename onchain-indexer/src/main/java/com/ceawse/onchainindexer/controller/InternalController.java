@@ -12,24 +12,15 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-// controller/InternalController.java
 @RestController
 @RequestMapping("/internal/v1")
 @RequiredArgsConstructor
 public class InternalController {
 
     private final CollectionRegistryRepository collectionRepository;
-    private final IndexerWorker indexerWorker; // Инжектим воркер
 
     @GetMapping("/collections")
     public List<CollectionRegistryDocument> getAllCollections() {
         return collectionRepository.findAll();
-    }
-
-    // НОВЫЙ МЕТОД: Запуск парсинга ончейн данных по запросу
-    @PostMapping("/onchain/run")
-    public ResponseEntity<String> runOnchainParsing() {
-        indexerWorker.runFullIndexing(); // Вызов асинхронного метода
-        return ResponseEntity.ok("Onchain indexing task triggered in background");
     }
 }

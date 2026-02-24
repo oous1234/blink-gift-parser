@@ -44,8 +44,4 @@ public class GiftHistoryDocument {
     private Integer symbolRare;
     private Integer giftNum;
     private Integer giftTotal;
-
-    @Indexed
-    private String snapshotId;
-    private String eventPayload;
 }

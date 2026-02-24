@@ -24,16 +24,6 @@ public interface PortalsApiClient {
             @RequestParam("action_types") String actionTypes
     );
 
-
-    @GetMapping("/nfts/search")
-    PortalsSearchResponseDto searchNfts(
-            @RequestParam("offset") int offset,
-            @RequestParam("limit") int limit,
-            @RequestParam("sort_by") String sortBy,
-            @RequestParam("status") String status,
-            @RequestParam("exclude_bundled") boolean excludeBundled
-    );
-
     @GetMapping("/collections")
     PortalsCollectionsResponseDto getCollections(@RequestParam("limit") int limit);
 

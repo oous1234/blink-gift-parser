@@ -4,8 +4,6 @@ public enum MarketEventType {
     PUTUPFORSALE,
     CANCELSALE,
     SOLD,
-    SNAPSHOT_LIST,
-    SNAPSHOT_FINISH,
     UNKNOWN;
 
     public static MarketEventType fromString(String type) {
