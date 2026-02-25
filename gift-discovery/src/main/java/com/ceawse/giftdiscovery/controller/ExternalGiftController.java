@@ -1,7 +1,7 @@
 package com.ceawse.giftdiscovery.controller;
 
 import com.ceawse.giftdiscovery.model.UniqueGiftDocument;
-import com.ceawse.giftdiscovery.repository.UniqueGiftRepository;
+import com.ceawse.giftdiscovery.repository.mongo.UniqueGiftRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;

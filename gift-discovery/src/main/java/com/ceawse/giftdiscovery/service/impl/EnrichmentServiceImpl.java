@@ -4,7 +4,7 @@ import com.ceawse.giftdiscovery.client.PythonGatewayClient;
 import com.ceawse.giftdiscovery.dto.external.PythonInventoryResponse;
 import com.ceawse.giftdiscovery.dto.external.PythonMetadataResponse;
 import com.ceawse.giftdiscovery.model.UniqueGiftDocument;
-import com.ceawse.giftdiscovery.repository.UniqueGiftRepository;
+import com.ceawse.giftdiscovery.repository.mongo.UniqueGiftRepository;
 import com.ceawse.giftdiscovery.service.EnrichmentService;
 import com.ceawse.giftdiscovery.service.MarketDataService;
 import lombok.RequiredArgsConstructor;

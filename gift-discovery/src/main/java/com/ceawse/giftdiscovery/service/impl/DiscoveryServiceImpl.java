@@ -3,7 +3,7 @@ package com.ceawse.giftdiscovery.service.impl;
 import com.ceawse.giftdiscovery.client.GiftMetadataFeignClient;
 import com.ceawse.giftdiscovery.dto.MetadataResponseDto;
 import com.ceawse.giftdiscovery.model.UniqueGiftDocument;
-import com.ceawse.giftdiscovery.repository.UniqueGiftRepository;
+import com.ceawse.giftdiscovery.repository.mongo.UniqueGiftRepository;
 import com.ceawse.giftdiscovery.service.DiscoveryService;
 import com.ceawse.giftdiscovery.service.MarketDataService;
 import lombok.RequiredArgsConstructor;

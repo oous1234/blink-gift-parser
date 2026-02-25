@@ -1,4 +1,4 @@
-package com.ceawse.giftdiscovery.repository;
+package com.ceawse.giftdiscovery.repository.mongo;
 
 import com.ceawse.giftdiscovery.model.ProcessorState;
 import org.springframework.data.mongodb.repository.MongoRepository;
