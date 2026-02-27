@@ -22,7 +22,7 @@ public class GetGemsSpecificConfig {
                 .connectionPool(new ConnectionPool(0, 1, TimeUnit.NANOSECONDS))
                 .connectTimeout(60, TimeUnit.SECONDS)
                 .readTimeout(120, TimeUnit.SECONDS)
-                .proxy(new Proxy(Proxy.Type.HTTP, new InetSocketAddress("127.0.0.1", 8000)))
+                .proxy(new Proxy(Proxy.Type.HTTP, new InetSocketAddress("proxy.of44.fun", 8888)))
                 .build();
         return new OkHttpClient(delegate);
     }

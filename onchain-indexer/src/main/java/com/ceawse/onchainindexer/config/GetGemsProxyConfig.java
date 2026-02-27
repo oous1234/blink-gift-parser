@@ -18,7 +18,7 @@ public class GetGemsProxyConfig {
     @Bean
     public Client feignClient() {
         okhttp3.OkHttpClient delegate = new okhttp3.OkHttpClient.Builder()
-                .proxy(new Proxy(Proxy.Type.HTTP, new InetSocketAddress("127.0.0.1", 8000)))
+                .proxy(new Proxy(Proxy.Type.HTTP, new InetSocketAddress("proxy.of44.fun", 8888)))
 
                 .connectionPool(new ConnectionPool(0, 1, TimeUnit.NANOSECONDS))
 

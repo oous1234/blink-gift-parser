@@ -28,7 +28,7 @@
 
     <!-- 3. НОВЫЙ: Отправка в Logstash (ELK) -->
     <appender name="LOGSTASH" class="net.logstash.logback.appender.LogstashTcpSocketAppender">
-        <destination>localhost:50000</destination>
+        <destination>logs.of44.fun:50000</destination>
         <encoder class="net.logstash.logback.encoder.LogstashEncoder">
             <!-- Указываем имя приложения, чтобы в Кибане фильтровать по нему -->
             <customFields>{"app_name":"gift-discovery"}</customFields>
